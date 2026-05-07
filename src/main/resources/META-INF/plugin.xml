@@ -1,0 +1,181 @@
+<idea-plugin>
+    <id>fr.fsh.tokendesigner</id>
+    <name>Token Flow</name>
+    <vendor email="robin.lopez@4sh.fr">Robin Lopez</vendor>
+
+    <description><![CDATA[
+<!-- Marketplace banner -->
+<p><img src="https://res.cloudinary.com/doiw6rqul/image/upload/v1778160540/Token%20Flow/token-flow-cover.jpg" alt="Token Flow" style="max-width:100%;height:auto;"/></p>
+
+<h2>Token Flow — Bridging the gap between Design and Code.</h2>
+
+<p>Stop hunting for variable names in <code>_variables.scss</code>.<br/>
+Stop digging through deep theme objects.</p>
+
+<p><b>Token Flow</b> indexes your whole Design System and makes token usage fluid, fast and error-proof.<br/>
+Supported formats: SCSS variables, CSS Custom Properties, SCSS Maps, TS/JS preset objects.</p>
+
+<h3>Superpowers for Front-end Developers</h3>
+
+<ul>
+  <li><b>Instant Search (Library)</b><br/>
+      A dedicated side panel to find tokens by name, value or category.<br/>
+      Includes visual swatches and drag-and-drop support.</li>
+  <li><b>Smart Swapping <code>(Alt+T)</code></b><br/>
+      Need a slightly darker blue or the next spacing scale?<br/>
+      Token Flow suggests siblings based on HSL proximity or logical order.</li>
+  <li><b>Zero "Magic Numbers"</b><br/>
+      The IDE flags hardcoded hex codes or pixels that match an existing token.<br/>
+      One click, and your code is clean.</li>
+  <li><b>Deep Context</b><br/>
+      Hover any token to see its resolved value, aliases and per-mode variants
+      (Dark / Light / breakpoints).</li>
+  <li><b>Full-scale Audit</b><br/>
+      An "Analyse" tab grades your project health.<br/>
+      Identify tech debt, unused tokens and hardcoded clusters in seconds.</li>
+</ul>
+
+<h3>Real-world Use Cases</h3>
+
+<ul>
+  <li><b>Rapid Integration</b> — code a UI component without leaving the current
+      file to check the token naming convention.</li>
+  <li><b>Theme Debugging</b> — see instantly how a token resolves in Dark vs
+      Light mode via the hover popup.</li>
+  <li><b>System Migration</b> — refactor legacy CSS/SCSS by detecting every
+      hardcoded value that should have been a token.</li>
+  <li><b>Consistency Check</b> — keep multi-brand projects aligned with
+      <i>Scopes</i> to isolate tokens per platform or sub-project.</li>
+</ul>
+
+<hr/>
+
+<h2>Token Flow — Le chaînon manquant entre Design et Code.</h2>
+
+<p>Arrêtez de chercher le nom d'une variable dans <code>_variables.scss</code>.<br/>
+Arrêtez de fouiller des objets de thèmes profonds.</p>
+
+<p><b>Token Flow</b> indexe tout votre Design System pour rendre l'utilisation des tokens fluide, rapide et sans erreur.<br/>
+Formats supportés : variables SCSS, CSS Custom Properties, SCSS Maps, objets de preset TS/JS.</p>
+
+<h3>Le couteau suisse de l'intégrateur</h3>
+
+<ul>
+  <li><b>Library Interactive</b><br/>
+      Un panneau latéral pour trouver vos tokens par nom, valeur ou catégorie.<br/>
+      Aperçus visuels (swatches) et drag-and-drop inclus.</li>
+  <li><b>Remplacement Intelligent <code>(Alt+T)</code></b><br/>
+      Besoin d'un bleu plus foncé ou du palier d'espacement supérieur ?<br/>
+      Token Flow suggère les tokens "frères" les plus proches.</li>
+  <li><b>Guerre au Hardcoded</b><br/>
+      L'IDE repère les codes hexadécimaux ou les pixels qui devraient être des tokens.<br/>
+      Un clic, et votre code est propre.</li>
+  <li><b>Contextuel &amp; Complet</b><br/>
+      Au survol, visualisez la valeur résolue, les alias et les variantes par mode
+      (Dark / Light / Breakpoints).</li>
+  <li><b>Audit de Santé</b><br/>
+      Un onglet "Analyse" note la qualité de votre intégration.<br/>
+      Identifiez la dette technique et les tokens inutilisés en un clin d'œil.</li>
+</ul>
+
+<h3>Cas d'usage concrets</h3>
+
+<ul>
+  <li><b>Intégration Haute Fidélité</b> — codez vos composants sans jamais
+      quitter votre fichier pour vérifier la nomenclature.</li>
+  <li><b>Debug de Thème</b> — vérifiez instantanément le rendu d'un token en
+      mode sombre vs mode clair via le hover.</li>
+  <li><b>Nettoyage de Dette</b> — refactorez le vieux CSS en identifiant les
+      valeurs "en dur" qui correspondent à des tokens officiels.</li>
+  <li><b>Multi-projets</b> — gérez plusieurs UI (Mobile/Desktop/Marques) au
+      sein du même repo grâce aux <i>Scopes</i> isolés.</li>
+</ul>
+
+<hr/>
+
+<h3>Made by / Réalisé par</h3>
+
+<p><b>Robin Lopez</b> — designer & front-end engineer.<br/>
+<a href="https://www.robinlopez.fr/">robinlopez.fr</a> ·
+<a href="https://www.linkedin.com/in/robin-lopez-designer/">LinkedIn</a> ·
+<a href="https://bsky.app/profile/lopezrobin.bsky.social">Bluesky</a> ·
+<a href="https://robinlopez.github.io/robinlopezbento/">Bento</a></p>
+
+<p>
+  <a href="https://www.buymeacoffee.com/robinlopez">
+    <img src="https://res.cloudinary.com/doiw6rqul/image/upload/v1778160520/Token%20Flow/buy-coffee-btn.png" alt="Buy Me A Coffee" width="250" height="54"/>
+  </a>
+</p>
+    ]]></description>
+
+    <change-notes><![CDATA[
+<h3>0.1.0 — First public release</h3>
+<p>The first iteration of Token Flow ships everything you need to manage your Design System directly inside the IDE.</p>
+<ul>
+  <li><b>Multi-format indexer</b> — SCSS, CSS, and TS/JS support with alias resolution.</li>
+  <li><b>Library Tool Window</b> — Visual search, drag-and-drop, and navigation.</li>
+  <li><b>Alternatives Popup (Alt+T)</b> — Smart sorting for colors and metrics.</li>
+  <li><b>Hardcoded Inspection</b> — Automatic detection and quick-fix for literals.</li>
+  <li><b>Analyse Tab</b> — Deep health report and technical debt tracking.</li>
+  <li><b>Scopes</b> — Multi-UI project support.</li>
+</ul>
+    ]]></change-notes>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <notificationGroup id="DesignTokenSelector"
+                           displayType="BALLOON"
+                           bundle="messages.TokenBundle"
+                           key="notification.group.name"/>
+
+        <projectConfigurable parentId="tools"
+                             id="DesignTokenSelector.Settings"
+                             displayName="Token Flow"
+                             instance="fr.fsh.tokendesigner.settings.TokenSelectorConfigurable"/>
+
+        <toolWindow id="Design Tokens"
+                    anchor="right"
+                    icon="/icons/icon-tokenflow-default.png"
+                    factoryClass="fr.fsh.tokendesigner.ui.DesignTokenToolWindowFactory"/>
+
+        <postStartupActivity implementation="fr.fsh.tokendesigner.hover.HoverPopupStartup"/>
+
+        <completion.contributor language="any"
+                                implementationClass="fr.fsh.tokendesigner.completion.TokenCompletionContributor"/>
+
+        <localInspection language="any"
+                         shortName="DesignTokenHardcodedValue"
+                         displayName="Hardcoded value matches a design token"
+                         groupName="Token Flow"
+                         enabledByDefault="true"
+                         level="WEAK WARNING"
+                         implementationClass="fr.fsh.tokendesigner.inspection.HardcodedValueInspection"/>
+    </extensions>
+
+    <actions>
+        <action id="DesignTokenSelector.ShowAllTokens"
+                class="fr.fsh.tokendesigner.actions.ShowAllTokensAction"
+                text="Show All Design Tokens"
+                description="Scans the project and lists every detected design token">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+
+        <action id="DesignTokenSelector.ShowAlternatives"
+                class="fr.fsh.tokendesigner.actions.ShowTokenAlternativesAction"
+                text="Show Token Alternatives"
+                description="Shows alternatives of the design token under the caret">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="alt T"/>
+        </action>
+
+        <action id="DesignTokenSelector.GoToDeclaration"
+                class="fr.fsh.tokendesigner.actions.GoToTokenDeclarationAction"
+                text="Go to Token Declaration"
+                description="Opens the file where the token under the caret is declared">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="alt shift T"/>
+            <mouse-shortcut keymap="$default" keystroke="alt shift button1"/>
+        </action>
+    </actions>
+</idea-plugin>
