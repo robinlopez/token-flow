@@ -1,0 +1,13 @@
+.gradle/
+build/
+.idea/
+*.iml
+out/
+.kotlin/
+.intellijPlatform/
+local.properties
+.claude/
+.DS_Store
+
+# Local-only working files (release notes drafts copy-pasted into GitHub UI)
+RELEASE_NOTES_*.md
