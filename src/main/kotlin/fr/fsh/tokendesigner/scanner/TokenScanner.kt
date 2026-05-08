@@ -163,9 +163,21 @@ class TokenScanner(private val project: Project) {
             val primary = group.first()
             val resolved = resolveValue(primary.rawValue, firstByName, mutableSetOf(primary.name))
             val variants = buildVariants(primary, group, ::textOf, firstByName)
-            val primaryLabel = if (primary.kind == TokenKind.JS_OBJECT_PATH)
-                TokenNameParser.modeSegmentOf(primary.name)
-            else null
+            // The primary token's "default" column header is replaced with its
+            // own declaration context whenever that's meaningful — so that an
+            // SCSS map nested under `$themes-config -> "themeOne" -> "light"`
+            // surfaces "themeOne light" on the primary just like its siblings,
+            // letting `VariantTableHtml` group columns by theme. JS preset
+            // tokens keep their dedicated mode-segment label (`light`/`dark`
+            // pulled from the path), since their context is the surrounding
+            // object literal rather than a CSS / SCSS chain.
+            val primaryLabel = when (primary.kind) {
+                TokenKind.JS_OBJECT_PATH -> TokenNameParser.modeSegmentOf(primary.name)
+                TokenKind.CSS_CUSTOM_PROPERTY,
+                TokenKind.SCSS_VARIABLE -> DeclarationContext
+                    .describeAt(textOf(primary.filePath), primary.offset)
+                    .takeIf { it.isNotBlank() }
+            }
             DesignToken(
                 name = canonicalName,
                 rawValue = primary.rawValue,

@@ -1,16 +1,12 @@
 <idea-plugin>
     <id>fr.fsh.tokendesigner</id>
     <name>Token Flow</name>
-    <vendor email="robin.lopez@4sh.fr">Robin Lopez</vendor>
+    <vendor email="robinlopez.contact@gmail.com">Robin Lopez</vendor>
 
     <description><![CDATA[
 <!-- Marketplace banner -->
-<p><img src="https://res.cloudinary.com/doiw6rqul/image/upload/v1778160540/Token%20Flow/token-flow-cover.jpg" alt="Token Flow" style="max-width:100%;height:auto;"/></p>
-
-<h2>Token Flow — Bridging the gap between Design and Code.</h2>
-
-<p>Stop hunting for variable names in <code>_variables.scss</code>.<br/>
-Stop digging through deep theme objects.</p>
+<p>Make using your tokens intuitive.<br/>
+Token Flow helps you find the right variable and keep your styles flawless without ever leaving your IntelliJ code.</p>
 
 <p><b>Token Flow</b> indexes your whole Design System and makes token usage fluid, fast and error-proof.<br/>
 Supported formats: SCSS variables, CSS Custom Properties, SCSS Maps, TS/JS preset objects.</p>
@@ -48,52 +44,7 @@ Supported formats: SCSS variables, CSS Custom Properties, SCSS Maps, TS/JS prese
       <i>Scopes</i> to isolate tokens per platform or sub-project.</li>
 </ul>
 
-<hr/>
-
-<h2>Token Flow — Le chaînon manquant entre Design et Code.</h2>
-
-<p>Arrêtez de chercher le nom d'une variable dans <code>_variables.scss</code>.<br/>
-Arrêtez de fouiller des objets de thèmes profonds.</p>
-
-<p><b>Token Flow</b> indexe tout votre Design System pour rendre l'utilisation des tokens fluide, rapide et sans erreur.<br/>
-Formats supportés : variables SCSS, CSS Custom Properties, SCSS Maps, objets de preset TS/JS.</p>
-
-<h3>Le couteau suisse de l'intégrateur</h3>
-
-<ul>
-  <li><b>Library Interactive</b><br/>
-      Un panneau latéral pour trouver vos tokens par nom, valeur ou catégorie.<br/>
-      Aperçus visuels (swatches) et drag-and-drop inclus.</li>
-  <li><b>Remplacement Intelligent <code>(Alt+T)</code></b><br/>
-      Besoin d'un bleu plus foncé ou du palier d'espacement supérieur ?<br/>
-      Token Flow suggère les tokens "frères" les plus proches.</li>
-  <li><b>Guerre au Hardcoded</b><br/>
-      L'IDE repère les codes hexadécimaux ou les pixels qui devraient être des tokens.<br/>
-      Un clic, et votre code est propre.</li>
-  <li><b>Contextuel &amp; Complet</b><br/>
-      Au survol, visualisez la valeur résolue, les alias et les variantes par mode
-      (Dark / Light / Breakpoints).</li>
-  <li><b>Audit de Santé</b><br/>
-      Un onglet "Analyse" note la qualité de votre intégration.<br/>
-      Identifiez la dette technique et les tokens inutilisés en un clin d'œil.</li>
-</ul>
-
-<h3>Cas d'usage concrets</h3>
-
-<ul>
-  <li><b>Intégration Haute Fidélité</b> — codez vos composants sans jamais
-      quitter votre fichier pour vérifier la nomenclature.</li>
-  <li><b>Debug de Thème</b> — vérifiez instantanément le rendu d'un token en
-      mode sombre vs mode clair via le hover.</li>
-  <li><b>Nettoyage de Dette</b> — refactorez le vieux CSS en identifiant les
-      valeurs "en dur" qui correspondent à des tokens officiels.</li>
-  <li><b>Multi-projets</b> — gérez plusieurs UI (Mobile/Desktop/Marques) au
-      sein du même repo grâce aux <i>Scopes</i> isolés.</li>
-</ul>
-
-<hr/>
-
-<h3>Made by / Réalisé par</h3>
+<h3>Made by</h3>
 
 <p><b>Robin Lopez</b> — designer & front-end engineer.<br/>
 <a href="https://www.robinlopez.fr/">robinlopez.fr</a> ·
@@ -109,6 +60,18 @@ Formats supportés : variables SCSS, CSS Custom Properties, SCSS Maps, objets de
     ]]></description>
 
     <change-notes><![CDATA[
+<h3>0.1.1 — Polish &amp; bug fixes</h3>
+<ul>
+  <li><b>Hover popup — multi-theme grouping</b>: tokens declared under nested
+      SCSS maps (<code>$themes-config -&gt; "themeOne" -&gt; "light" -&gt; …</code>)
+      now render with theme-grouped column headers instead of a flat
+      <code>default | dark | light | dark</code> sequence.</li>
+  <li><b>Settings — Scopes tab</b>: long intro hints no longer trigger a
+      horizontal scrollbar when the dialog is narrow; HTML paragraphs wrap
+      properly inside the available width.</li>
+  <li>Marketplace metadata cleanup (vendor contact, simplified description).</li>
+</ul>
+
 <h3>0.1.0 — First public release</h3>
 <p>The first iteration of Token Flow ships everything you need to manage your Design System directly inside the IDE.</p>
 <ul>

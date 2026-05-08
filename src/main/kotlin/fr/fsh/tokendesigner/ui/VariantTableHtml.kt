@@ -85,7 +85,11 @@ object VariantTableHtml {
             .trim('(', ')')
             .trim()
             .trimStart('.', ':', '&', ' ')
-        return null to cleaned.ifBlank { s }.take(24)
+        // When the chain only carried structural tokens (`:root`, `@media`, …)
+        // and nothing user-meaningful remains, label the column "default" rather
+        // than re-using the raw chain — otherwise the primary of a token defined
+        // simply under `:root` would surface as a `:root` header.
+        return null to cleaned.ifBlank { "default" }.take(24)
     }
 
     private fun isModeWord(s: String): Boolean {

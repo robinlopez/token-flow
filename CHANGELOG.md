@@ -4,6 +4,19 @@ Format : [Keep a Changelog](https://keepachangelog.com/) — versionning [SemVer
 
 ## [Unreleased]
 
+## [0.1.1] — 2026-05-08
+
+### Fixed
+- **Hover popup — variants groupées par thème** : un token déclaré dans un map SCSS imbriqué (`$themes-config -> "themeOne" -> "light" -> …`) affichait ses variantes en colonnes plates `default | dark | light | dark | light | dark` sans correspondance thème ↔ mode. Le scanner remonte désormais la chaîne de contexte du token primary (`DeclarationContext.describeAt` étendu à `CSS_CUSTOM_PROPERTY` et `SCSS_VARIABLE`, plus seulement `JS_OBJECT_PATH`), et `parseCondition` retombe sur `"default"` au lieu de fuiter `:root`/`@media` quand la chaîne ne contient que du structurel. Résultat : header à 2 lignes `themeOne | themeTwo | themeThree` × `light | dark` pour 3 thèmes × 2 modes.
+- **Settings — onglet Scopes scroll horizontal** : les paragraphes d'intro (HTML wrappés via `JEditorPane`) annonçaient une `preferredSize.width` égale à la longueur du texte non-wrappé, ce qui forçait le `JScrollPane` du dialog Settings à afficher une scrollbar horizontale. Override de `getPreferredSize()` qui force un layout à la largeur du parent (calcul de la hauteur wrappée correcte) puis claim `width=0` → le parent peut shrinker, BorderLayout.NORTH grant la pleine largeur au render → wrapping HTML honoré.
+
+### Changed
+- **Marketplace metadata** : vendor email mis à jour (`robinlopez.contact@gmail.com`), description CDATA simplifiée (suppression de la version FR doublonnée et de la cover image inline — déjà visible dans le README et sur la page Marketplace).
+
+## [0.1.0-internal-iterations]
+
+> Note : entrées listées initialement dans `[Unreleased]` lors du développement avant la première release publique. Conservées pour traçabilité.
+
 ### Added
 - **Support TS/JS preset files** (PrimeUIX, Style Dictionary, Material 3 themes…) :
   - Nouvelles extensions scannées : `.ts/.tsx/.js/.jsx/.mjs/.cjs`

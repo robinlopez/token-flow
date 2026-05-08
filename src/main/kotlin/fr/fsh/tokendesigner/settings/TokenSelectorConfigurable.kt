@@ -155,15 +155,30 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
      * wraps), which forces the parent to grow horizontally and triggers a
      * horizontal scroll. A read-only `JEditorPane` honors paragraph wrapping
      * inside the available width — exactly what we need for intro hints.
+     *
+     * We also override `getPreferredSize()` to claim width=0: the Settings
+     * dialog wraps each `Configurable` in a `JScrollPane`, and `JEditorPane`'s
+     * default preferred width is the longest unwrapped line — so the scope tab
+     * was reporting a preferred width of ~700px and triggering a horizontal
+     * scrollbar. Returning width=0 lets BorderLayout still grant the component
+     * the full container width at render time (so the HTML wraps), while
+     * keeping the parent free to shrink horizontally with the dialog.
      */
     private fun htmlMultiLine(html: String): JComponent =
-        JEditorPane("text/html", "<html>$html</html>").apply {
+        object : JEditorPane("text/html", "<html>$html</html>") {
+            override fun getPreferredSize(): Dimension {
+                val w = parent?.width ?: 0
+                if (w > 0) setSize(w, Short.MAX_VALUE.toInt())
+                val pref = super.getPreferredSize()
+                return Dimension(0, pref.height)
+            }
+        }.apply {
             isEditable = false
             isOpaque = false
             border = null
             font = JBLabel().font
             putClientProperty("JEditorPane.honorDisplayProperties", true)
-            minimumSize = Dimension(80, 0)
+            minimumSize = Dimension(0, 0)
         }
 
     override fun isModified(): Boolean {
