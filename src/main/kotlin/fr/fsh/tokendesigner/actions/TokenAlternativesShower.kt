@@ -21,6 +21,7 @@ import fr.fsh.tokendesigner.model.TokenKind
 import fr.fsh.tokendesigner.scanner.CandidateSorter
 import fr.fsh.tokendesigner.scanner.TokenIndex
 import fr.fsh.tokendesigner.scanner.TokenLocator
+import fr.fsh.tokendesigner.ui.PopupRow
 import fr.fsh.tokendesigner.ui.PopupRowRenderer
 import fr.fsh.tokendesigner.ui.RowGrouping
 import fr.fsh.tokendesigner.ui.TokenPopupRow
@@ -239,5 +240,112 @@ object TokenAlternativesShower {
         val xy = editor.visualPositionToXY(visual)
         xy.translate(0, editor.lineHeight)
         return RelativePoint(editor.contentComponent, xy)
+    }
+
+    // ─── Value-based auto-popup ──────────────────────────────────────────
+
+    /**
+     * Shows the alternatives popup for a **partial value** the user is typing.
+     *
+     * Called by the [fr.fsh.tokendesigner.completion.ValueCompletionTypedHandler]
+     * when the line matches `property: <partial>`.  Unlike [showForLiteral] this
+     * method does *not* require a complete [LiteralFinder.Hit] — it searches all
+     * tokens whose `resolvedValue` starts with [partialValue] (case-insensitive),
+     * boosts the category that matches [propertyName], and shows the standard
+     * categorised popup.
+     *
+     * @param replaceStart absolute offset of the first character of the value
+     *                     being typed (used to replace it on selection).
+     * @param replaceEnd   absolute offset just past the last typed character.
+     */
+    fun showForPartialValue(
+        project: Project,
+        editor: Editor,
+        partialValue: String,
+        propertyName: String,
+        replaceStart: Int,
+        replaceEnd: Int,
+    ) {
+        activePopup.getAndSet(null)?.takeIf { it.isVisible }?.cancel()
+
+        object : Task.Backgroundable(project, "Looking up token suggestions", true) {
+            override fun run(indicator: ProgressIndicator) {
+                indicator.isIndeterminate = true
+                val file = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance().getFile(editor.document)
+                val ext = file?.extension?.lowercase()
+                val allTokens = runReadAction { TokenIndex.getInstance(project).get(file) }
+                val tokens = allTokens.filter { it.kind in compatibleKinds(ext) }
+                val expected = PropertyContext.categoryFor(propertyName)
+
+                // Find tokens whose resolved value starts with the partial text.
+                val pv = partialValue.trim().lowercase()
+                val matching = if (pv.isEmpty()) {
+                    // Empty value: show all tokens of the expected category (or all if unknown).
+                    if (expected != null) tokens.filter { it.category == expected }
+                    else tokens
+                } else {
+                    tokens.filter { token ->
+                        val rv = token.resolvedValue.trim().lowercase()
+                        rv.startsWith(pv) || rv == pv
+                    }
+                }
+                if (matching.isEmpty()) {
+                    // No matching tokens — don't show anything (avoid spamming).
+                    return
+                }
+                val sorted = CandidateSorter.sort(
+                    expected ?: matching.first().category,
+                    matching,
+                    null,
+                )
+                val rows = RowGrouping.buildRows(sorted, null)
+                ApplicationManager.getApplication().invokeLater {
+                    if (editor.isDisposed) return@invokeLater
+                    showPartialValuePopup(project, editor, rows, partialValue, expected, replaceStart, replaceEnd)
+                }
+            }
+        }.queue()
+    }
+
+    private fun showPartialValuePopup(
+        project: Project,
+        editor: Editor,
+        rows: List<PopupRow>,
+        partialValue: String,
+        expected: fr.fsh.tokendesigner.model.TokenCategory?,
+        replaceStart: Int,
+        replaceEnd: Int,
+    ) {
+        val title = buildString {
+            append("Tokens matching \"$partialValue\"")
+            expected?.let { append(" — ${it.name.lowercase()}") }
+        }
+
+        val popup = JBPopupFactory.getInstance()
+            .createPopupChooserBuilder(rows)
+            .setRenderer(PopupRowRenderer())
+            .setTitle(title)
+            .setMovable(true)
+            .setResizable(true)
+            .setRequestFocus(true)
+            .setNamerForFiltering { it.filterKey }
+            .setItemChosenCallback { selected ->
+                if (selected is TokenPopupRow) {
+                    val replacement = when (selected.token.kind) {
+                        TokenKind.SCSS_VARIABLE -> selected.token.name
+                        TokenKind.CSS_CUSTOM_PROPERTY -> "var(${selected.token.name})"
+                        TokenKind.JS_OBJECT_PATH -> "'{${selected.token.name}}'"
+                    }
+                    WriteCommandAction.runWriteCommandAction(project, "Replace Value with Token", null, {
+                        editor.document.replaceString(replaceStart, replaceEnd, replacement)
+                    })
+                }
+            }
+            .setMinSize(JBUI.size(580, 320))
+            .setDimensionServiceKey("DesignTokenSelector.ValueCompletionPopup")
+            .createPopup()
+
+        activePopup.set(popup)
+        popup.showInBestPositionFor(editor)
     }
 }

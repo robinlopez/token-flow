@@ -114,6 +114,10 @@ Supported formats: SCSS variables, CSS Custom Properties, SCSS Maps, TS/JS prese
                          enabledByDefault="true"
                          level="WEAK WARNING"
                          implementationClass="fr.fsh.tokendesigner.inspection.HardcodedValueInspection"/>
+
+        <typedHandler implementation="fr.fsh.tokendesigner.completion.ValueCompletionTypedHandler"/>
+
+        <postStartupActivity implementation="fr.fsh.tokendesigner.completion.ValueCompletionStartup"/>
     </extensions>
 
     <actions>

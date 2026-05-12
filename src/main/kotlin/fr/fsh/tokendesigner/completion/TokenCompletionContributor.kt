@@ -5,10 +5,11 @@ import com.intellij.codeInsight.completion.CompletionParameters
 import com.intellij.codeInsight.completion.CompletionResultSet
 import com.intellij.codeInsight.completion.PrioritizedLookupElement
 import com.intellij.codeInsight.lookup.LookupElementBuilder
+import fr.fsh.tokendesigner.inspection.PropertyContext
+import fr.fsh.tokendesigner.inspection.TokenValueIndex
 import fr.fsh.tokendesigner.model.DesignToken
 import fr.fsh.tokendesigner.model.TokenCategory
 import fr.fsh.tokendesigner.model.TokenKind
-import fr.fsh.tokendesigner.inspection.PropertyContext
 import fr.fsh.tokendesigner.scanner.TokenIndex
 import fr.fsh.tokendesigner.scanner.TokenNameParser
 import fr.fsh.tokendesigner.settings.TokenSelectorSettings
@@ -16,20 +17,18 @@ import fr.fsh.tokendesigner.ui.ColorParser
 import javax.swing.Icon
 
 /**
- * Code completion for design tokens inside `.scss/.sass/.css` files.
+ * Code completion for design tokens inside `.scss/.sass/.css/.ts/.tsx/.js/.jsx` files.
  *
- *  - On `var(--prefix` → suggests CSS custom-property tokens whose name
- *    starts with `--prefix`.
- *  - On `$prefix` (in SCSS/Sass files) → suggests SCSS variables whose
- *    name starts with `$prefix`.
- *  - Tokens whose category matches the surrounding CSS property
- *    (e.g. `color: var(--…)` ⇒ COLOR tokens) are boosted to the top.
- *  - Tokens whose family already appears earlier in the same selector
- *    block (e.g. `--token-informative-…` already used) are also boosted,
- *    so the user gets the most contextually relevant suggestions first.
+ * **Mode A — prefix completion** (existing):
+ *  - On `var(--prefix` → suggests CSS custom-property tokens whose name starts with `--prefix`.
+ *  - On `$prefix` (in SCSS/Sass files) → suggests SCSS variables.
+ *  - Tokens whose category matches the surrounding CSS property are boosted.
  *
- * Operates purely on the document text — no dependency on the bundled CSS
- * plugin — so the contributor works in IDEA Community as well as Ultimate.
+ * **Mode B — value completion** (new):
+ *  - On `property: <partial-value>` → suggests tokens whose `resolvedValue` starts with the
+ *    typed partial value.  This allows `padding: 4` to propose `$spacing-4` or `var(--spacing-4)`.
+ *  - Controlled by `valueCompletionEnabled` and `valueCompletionMinChars` in settings.
+ *  - Works in CSS/SCSS and JS/TS style files.
  */
 class TokenCompletionContributor : CompletionContributor() {
 
@@ -39,64 +38,64 @@ class TokenCompletionContributor : CompletionContributor() {
         if (ext !in TARGET_EXTS) return
 
         val project = parameters.position.project
-        if (!TokenSelectorSettings.getInstance(project).autocompleteEnabled) return
+        val settings = TokenSelectorSettings.getInstance(project)
+
         val document = parameters.editor.document
         val offset = parameters.offset
-
         val lineNumber = document.getLineNumber(offset)
         val lineStart = document.getLineStartOffset(lineNumber)
         val lineText = document.charsSequence.subSequence(lineStart, offset).toString()
 
-        // Detect which prefix is being typed.
         val isJs = ext in JS_EXTS
         val isScssLike = ext == "scss" || ext == "sass"
-        val cssMatch = if (!isJs) CSS_VAR_PREFIX.find(lineText) else null
-        val scssMatch = if (isScssLike) SCSS_VAR_PREFIX.find(lineText) else null
-        val jsMatch = if (isJs) JS_PATH_PREFIX.find(lineText) else null
 
-        val context = when {
-            jsMatch != null -> Context(
-                prefix = jsMatch.groupValues[1],
-                kind = TokenKind.JS_OBJECT_PATH,
-            )
-            cssMatch != null -> Context(
-                prefix = "--" + cssMatch.groupValues[1],
-                kind = TokenKind.CSS_CUSTOM_PROPERTY,
-            )
-            scssMatch != null -> Context(
-                prefix = "$" + scssMatch.groupValues[1],
-                kind = TokenKind.SCSS_VARIABLE,
-            )
-            else -> return
-        }
+        // ── Mode A: prefix-based completion ─────────────────────────────────
+        if (settings.autocompleteEnabled) {
+            val cssMatch = if (!isJs) CSS_VAR_PREFIX.find(lineText) else null
+            val scssMatch = if (isScssLike) SCSS_VAR_PREFIX.find(lineText) else null
+            val jsMatch = if (isJs) JS_PATH_PREFIX.find(lineText) else null
 
-        // JS preset paths can carry a `modeLight` / `modeDark` segment that
-        // was stripped when the token was indexed. Strip it from the prefix
-        // before matching, then re-inject it in the inserted text so the
-        // completion lands at `'{token.modeLight.actions.high.surface.default}'`
-        // rather than the canonical mode-less form.
-        val canonicalPrefix = if (context.kind == TokenKind.JS_OBJECT_PATH) {
-            TokenNameParser.stripModeSegment(context.prefix) ?: context.prefix
-        } else context.prefix
-        val rawMode = if (context.kind == TokenKind.JS_OBJECT_PATH)
-            TokenNameParser.rawModeSegmentOf(context.prefix) else null
-        val modeIdx = if (rawMode != null) TokenNameParser.modeSegmentIndex(context.prefix) else -1
+            val context = when {
+                jsMatch != null -> Context(
+                    prefix = jsMatch.groupValues[1],
+                    kind = TokenKind.JS_OBJECT_PATH,
+                )
+                cssMatch != null -> Context(
+                    prefix = "--" + cssMatch.groupValues[1],
+                    kind = TokenKind.CSS_CUSTOM_PROPERTY,
+                )
+                scssMatch != null -> Context(
+                    prefix = "$" + scssMatch.groupValues[1],
+                    kind = TokenKind.SCSS_VARIABLE,
+                )
+                else -> null
+            }
 
-        val matcher = result.withPrefixMatcher(canonicalPrefix)
-        val tokens = TokenIndex.getInstance(project).get(virtualFile)
-        if (tokens.isEmpty()) return
+            if (context != null) {
+                val canonicalPrefix = if (context.kind == TokenKind.JS_OBJECT_PATH) {
+                    TokenNameParser.stripModeSegment(context.prefix) ?: context.prefix
+                } else context.prefix
+                val rawMode = if (context.kind == TokenKind.JS_OBJECT_PATH)
+                    TokenNameParser.rawModeSegmentOf(context.prefix) else null
+                val modeIdx = if (rawMode != null) TokenNameParser.modeSegmentIndex(context.prefix) else -1
 
-        // Smart context hints.
-        val expectedCategory = inferCategoryFromProperty(lineText)
-        val nearbyFamilies = collectNearbyFamilies(document, offset)
-
-        for (token in tokens) {
-            if (token.kind != context.kind) continue
-            if (!token.name.startsWith(canonicalPrefix)) continue
-            val insertText = if (rawMode != null && modeIdx >= 0) {
-                TokenNameParser.injectModeSegment(token.name, rawMode, modeIdx)
-            } else token.name
-            matcher.addElement(buildLookup(token, insertText, expectedCategory, nearbyFamilies))
+                val matcher = result.withPrefixMatcher(canonicalPrefix)
+                val tokens = TokenIndex.getInstance(project).get(virtualFile)
+                if (tokens.isNotEmpty()) {
+                    val expectedCategory = inferCategoryFromProperty(lineText)
+                    val nearbyFamilies = collectNearbyFamilies(document, offset)
+                    for (token in tokens) {
+                        if (token.kind != context.kind) continue
+                        if (!token.name.startsWith(canonicalPrefix)) continue
+                        val insertText = if (rawMode != null && modeIdx >= 0) {
+                            TokenNameParser.injectModeSegment(token.name, rawMode, modeIdx)
+                        } else token.name
+                        matcher.addElement(buildLookup(token, insertText, expectedCategory, nearbyFamilies))
+                    }
+                }
+                // Mode A matched: don't also run Mode B on the same trigger.
+                return
+            }
         }
     }
 
@@ -142,8 +141,7 @@ class TokenCompletionContributor : CompletionContributor() {
     /**
      * Walks back from [offset] to the nearest `{` to scope the lookup to the
      * current selector block, then collects every `var(--…)` and `$…` family
-     * found inside it. The active line is included so the moment the user types
-     * one token, sibling families get boosted for the next.
+     * found inside it.
      */
     private fun collectNearbyFamilies(document: com.intellij.openapi.editor.Document, offset: Int): Set<String> {
         val text = document.charsSequence

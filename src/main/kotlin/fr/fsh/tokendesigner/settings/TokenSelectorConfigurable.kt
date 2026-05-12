@@ -67,6 +67,8 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
     private val hoverCheckBox = JBCheckBox("Show token info (resolved value & variants) on hover")
     private val hoverDelaySpinner = JSpinner(SpinnerNumberModel(700, 100, 5000, 100))
     private val autocompleteCheckBox = JBCheckBox("Suggest design tokens in code completion (var(--…) and \$…)")
+    private val valueCompletionCheckBox = JBCheckBox("Suggest matching tokens when typing a value (e.g. padding: 4…)")
+    private val valueCompletionTriggerCombo = javax.swing.JComboBox(ValueCompletionTrigger.entries.toTypedArray())
     private val iconVariantCombo = javax.swing.JComboBox(IconVariant.entries.toTypedArray()).apply {
         // List rows show a 48px preview; the closed combo (index == -1) keeps a
         // compact 16px size so it doesn't blow up the form layout.
@@ -187,6 +189,8 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
         if (saved.openOnHover != hoverCheckBox.isSelected) return true
         if (saved.hoverDelayMs != hoverDelaySpinner.value as Int) return true
         if (saved.autocompleteEnabled != autocompleteCheckBox.isSelected) return true
+        if (saved.valueCompletionEnabled != valueCompletionCheckBox.isSelected) return true
+        if (saved.valueCompletionMinChars != (valueCompletionTriggerCombo.selectedItem as ValueCompletionTrigger).minChars) return true
         if (saved.iconVariantName != (iconVariantCombo.selectedItem as IconVariant).name) return true
         return !sameScopes(saved.scopes, currentScopes())
     }
@@ -198,6 +202,8 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
         s.openOnHover = hoverCheckBox.isSelected
         s.hoverDelayMs = hoverDelaySpinner.value as Int
         s.autocompleteEnabled = autocompleteCheckBox.isSelected
+        s.valueCompletionEnabled = valueCompletionCheckBox.isSelected
+        s.valueCompletionMinChars = (valueCompletionTriggerCombo.selectedItem as ValueCompletionTrigger).minChars
         val newIcon = (iconVariantCombo.selectedItem as IconVariant).name
         val iconChanged = s.iconVariantName != newIcon
         s.iconVariantName = newIcon
@@ -217,6 +223,9 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
         hoverDelaySpinner.value = s.hoverDelayMs
         hoverDelaySpinner.isEnabled = s.openOnHover
         autocompleteCheckBox.isSelected = s.autocompleteEnabled
+        valueCompletionCheckBox.isSelected = s.valueCompletionEnabled
+        valueCompletionTriggerCombo.selectedItem = ValueCompletionTrigger.fromMinChars(s.valueCompletionMinChars)
+        valueCompletionTriggerCombo.isEnabled = s.valueCompletionEnabled
         iconVariantCombo.selectedItem = IconVariant.fromName(s.iconVariantName)
     }
 
@@ -392,6 +401,15 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
             add(hoverDelaySpinner)
             add(JBLabel("ms"))
         }
+        valueCompletionCheckBox.addActionListener {
+            valueCompletionTriggerCombo.isEnabled = valueCompletionCheckBox.isSelected
+        }
+        val valueCompletionTriggerRow = JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(6), 0)).apply {
+            alignmentX = java.awt.Component.LEFT_ALIGNMENT
+            border = JBEmptyBorder(0, JBUI.scale(20), 0, 0)
+            add(JBLabel("Show suggestions:"))
+            add(valueCompletionTriggerCombo)
+        }
         val alternativesShortcutLink = HyperlinkLabel(
             "Customize \"Show Token Alternatives\" shortcut (Alt+T by default)…"
         ).apply {
@@ -424,6 +442,9 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
             add(verticalSpacer())
             add(sectionCompletion)
             add(autocompleteCheckBox.apply { alignmentX = java.awt.Component.LEFT_ALIGNMENT })
+            add(javax.swing.Box.createVerticalStrut(JBUI.scale(6)))
+            add(valueCompletionCheckBox.apply { alignmentX = java.awt.Component.LEFT_ALIGNMENT })
+            add(valueCompletionTriggerRow)
             add(verticalSpacer())
             add(sectionShortcut)
             add(alternativesShortcutLink)
