@@ -293,11 +293,7 @@ object TokenAlternativesShower {
                     // No matching tokens — don't show anything (avoid spamming).
                     return
                 }
-                val sorted = CandidateSorter.sort(
-                    expected ?: matching.first().category,
-                    matching,
-                    null,
-                )
+                val sorted = matching.sortedBy { it.name }
                 val rows = RowGrouping.buildRows(sorted, null)
                 ApplicationManager.getApplication().invokeLater {
                     if (editor.isDisposed) return@invokeLater
