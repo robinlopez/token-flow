@@ -4,6 +4,38 @@ Format : [Keep a Changelog](https://keepachangelog.com/) — versionning [SemVer
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-05-13
+
+### Added
+- **Support React Native / CSS-in-JS runtime themes** :
+  - Nouveau `TokenKind.JS_RUNTIME_PROPERTY` pour les jetons accédés par propriété (`colors.PRIMARY_500`, `radius.sm`, `theme.fontPresets.h1.fontSize`).
+  - Détection des `const X = { … }` (bag, garde le préfixe `X.`) et des `export const X: Type = { … }` (agrégateur typé, strippe le préfixe → chemins type `colors.PRIMARY_500` / `fontPresets.h1.fontSize` alignés sur les re-exports barrel).
+  - Résolution des alias bare-property (`PRIMARY_500: colors.PRIMARY_500`) en plus des alias Style-Dictionary `{…}`.
+  - Dispatch automatique par fichier (`JsTokenFileParserRegistry`) : présence d'aliases `'{a.b}'` → Style-Dictionary ; sinon imports `react-native` / `StyleSheet.create` / typed export → Runtime ; fallback historique pour les presets sans alias.
+- **Helpers callables (`spacing`, `radius`, …)** — nouveau `TokenKind.JS_RUNTIME_FUNCTION` :
+  - `RuntimeFunctionParser` détecte les arrow functions linéaires `(p[: T]) => UNIT * p` (et variantes `Math.floor(unit * Math.abs(p))`, `UNIT * Math.abs(p)`, p ↔ unit swappé). `UNIT` peut être un littéral numérique ou une `const NAME = NUMBER` déclarée plus haut.
+  - Suggestions inversées : un `12px` hardcodé + un helper `spacing(unit=8)` propose `spacing(1.5)` (snap au quart de pas, tolérance 0.05).
+  - **Alt+T sur `spacing(0.5)`** ouvre une popup de scale (`spacing(0.25)`, `spacing(0.5)`, `spacing(1)`, …) avec pré-sélection de la valeur courante.
+  - Badge **ƒ** dans `TokenCellRenderer` pour distinguer les helpers callables des jetons à valeur fixe.
+- **Détection des littéraux numériques sans unité** : nouveau `LiteralFinder.Kind.NUMBER` qui matche `IDENT: NUMBER` (ex : `fontSize: 34`, `lineHeight: 24`, `opacity: 0.5`). Filtré aux fichiers JS/TS dans l'inspection et le panel Hardcoded values (CSS shorthand `border: 1 solid red` aurait sinon généré du bruit). Numéros à l'intérieur d'un `(…)` (arguments de helper) ignorés.
+- **Re-sync action** dans la toolbar de l'onglet Analyser (icône `ForceRefresh`) : drop hard du cache `TokenIndex` + reconstruction du combo de scope.
+- **`TokenSelectorSettings.fireScopesChanged()`** + `addScopesChangeListener()` : nouvelle API pubsub permettant aux panneaux live de réagir aux modifications de scope sans restart IDE. `AnalyzePanel` s'y abonne pour reconstruire son combo et invalider l'analyse précédente.
+- **`TokenLocator` reconnaît les expressions runtime** :
+  - Property-access chains `colors.PRIMARY_500`, `theme.radius.sm` (requiert au moins un `.`, rejette les contextes `$`/`-`).
+  - Helper calls `spacing(0.5)` (capture l'expression complète, rejette les `obj.method(…)`).
+- **Complétion par préfixe runtime** : trigger `colors.` / `theme.radius.` dans les `.ts/.tsx` propose les jetons `JS_RUNTIME_PROPERTY` correspondants.
+
+### Changed
+- **Refactor `scanner/parsers/`** : `JsObjectTokenParser` expose désormais `parseAt(text, openBrace, initialPath)` réutilisable. Les stratégies `StyleDictionaryParser`, `RuntimeObjectParser`, `RuntimeFunctionParser` cohabitent derrière `JsTokenFileParserRegistry`. Ajouter un nouveau stack = une seule classe à enregistrer.
+- **Centralisation du formatage de référence** : nouveau `TokenReference.expression(token)` — toutes les insertions (`var(--name)`, `$name`, `'{path}'`, `colors.X`, `spacing(N)`) passent par ce helper. Ajouter un futur `TokenKind` n'est plus qu'une seule branche.
+- **Popup de complétion par valeur** : `setRequestFocus(false)` + `setCancelOnClickOutside(true)` → l'éditeur garde le focus, les frappes continuent dans le code, la popup agit comme un hint cliquable. Plus de `4` qui termine dans le champ de recherche au lieu du fichier.
+- **Analyser scope-aware** : `DesignSystemAnalyzer.computeCoverage` accepte `scopeFile` et restreint le file walk aux `rootPath` des scopes actifs (résolus via `ScopeResolver.activeScopesFor`). Les `sourcePaths` exclus sont aussi limités aux scopes actifs (au lieu de l'union globale qui masquait des hits valides).
+- **Annotations de type acceptées par le scanner** : `export const X: Theme = { … }` est désormais reconnu (la regex historique stoppait sur l'annotation).
+
+### Fixed
+- **Quick-fixes JS/TS** insèrent désormais la syntaxe correcte selon le `TokenKind` (`'{path}'` pour Style-Dictionary, `colors.X` pour property-access, `spacing(1.5)` pour helper call). Avant, l'ajout d'un kind nécessitait de toucher 5 sites distincts ; centralisé via `TokenReference`.
+- **Cache `TokenIndex` invalidé après changement de scope** : le listener `fireScopesChanged` est déclenché *après* `TokenIndex.invalidate()`, donc les panels live re-fetch sur un état frais.
+
 ## [0.1.1] — 2026-05-08
 
 ### Fixed

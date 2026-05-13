@@ -11,8 +11,10 @@ Catalogue vivant des fonctionnalités du plugin. À mettre à jour à chaque év
 | `--var: value;` (CSS / SCSS source) | ✅ | Custom properties standard |
 | `$var: value;` (SCSS) | ✅ | Variables Sass |
 | `"name": value,` (SCSS map keys) | ✅ | Tokens type `name` (Style Dictionary, etc.) |
-| Objets TS/JS (`export default { … }`) | ✅ | Path en pointillé (`color.primary.500`) |
-| Aliases récursifs (`$a: $b`, `var(--c)`) | ✅ | Garde anti-cycle |
+| TS/JS Style-Dictionary (`export const X = { … }`, `'{a.b}'` aliases) | ✅ | Path en pointillé (`color.primary.500`) |
+| **TS/JS Runtime / React Native** (`const X = { … }`, `export const X: Type = { … }`) | ✅ | `colors.PRIMARY_500`, `radius.sm`, `theme.fontPresets.h1.fontSize`. Export typé → préfixe strippé (aligné sur les re-exports barrel) ; bag → préfixe conservé. Switch automatique de parser par fichier |
+| **TS/JS Callable helpers** (`const spacing = (v) => UNIT * v`) | ✅ | Arrow functions linéaires 1-param. Badge ƒ dans la library. Suggestions inverses sur les littéraux |
+| Aliases récursifs (`$a: $b`, `var(--c)`, `'{a.b}'`, `colors.X`) | ✅ | Garde anti-cycle, alias bare-property runtime résolus |
 
 Catégorisation automatique : `COLOR`, `SPACING`, `TYPOGRAPHY`, `RADIUS`, `SHADOW`, `DURATION`, `OTHER` (basée sur nom + valeur).
 
@@ -42,13 +44,17 @@ Catégorisation automatique : `COLOR`, `SPACING`, `TYPOGRAPHY`, `RADIUS`, `SHADO
 
 ## 4. Alternatives popup (`Alt+T`)
 
-- Curseur sur un token → liste des tokens de la même catégorie, triés par proximité (HSL pour COLOR, valeur croissante pour LENGTH).
-- Curseur sur un littéral hardcodé (`#fff`, `12px`, `200ms`) → liste de tokens correspondants ou approchants.
+- Curseur sur un token CSS/SCSS (`$name`, `var(--name)`) → liste des tokens de la même catégorie, triés par proximité (HSL pour COLOR, valeur croissante pour LENGTH).
+- Curseur sur un path Style-Dictionary (`'{a.b.c}'`, `dt('a.b')`) ou une property-access runtime (`colors.PRIMARY_500`, `theme.radius.sm`) → mêmes alternatives.
+- Curseur sur un **helper call** (`spacing(0.5)`, `radius(2)`) → popup *scale* spécifique : variants synthétiques `spacing(0.25)` … `spacing(10)` calculés à partir de l'unité du helper, valeur courante pré-sélectionnée (flèches haut/bas pour naviguer la scale).
+- Curseur sur un littéral hardcodé (`#fff`, `12px`, `200ms`, ou `34` en JS/TS) → liste de tokens correspondants ou approchants.
 - Sélection → remplace dans le code (write action).
 
 ## 5. Inspection « Hardcoded value matches a design token »
 
 - Détecte hex / `rgb()` / `hsl()` / lengths / durations qui matchent un token existant.
+- **Numériques sans unité** (`fontSize: 34`, `lineHeight: 24`, `opacity: 0.5`) détectés en position propriété-valeur — limité aux fichiers JS/TS pour éviter le bruit en CSS shorthand. Les numéros à l'intérieur d'un `(…)` (arguments de helper) sont ignorés.
+- **Helper-aware** : un `12px` hardcodé propose `spacing(1.5)` si un helper `spacing(unit=8)` est indexé (snap aux multiples de 0.25, tolérance 0.05).
 - Conversion px ↔ rem ↔ em (base 16 px) pour faire matcher tokens en rem ↔ littéraux en px.
 - Quick-fixes : jusqu'à 5 suggestions par occurrence, classées par contexte CSS détecté (`color: …` priorise les COLOR, `font-size: …` priorise TYPOGRAPHY, …).
 - Approximation couleur : tokens à ≤5 % de delta RGBA proposés comme « closest token ».
@@ -61,12 +67,14 @@ Catégorisation automatique : `COLOR`, `SPACING`, `TYPOGRAPHY`, `RADIUS`, `SHADO
 
 - `var(--…` → suggère les CSS custom properties indexées.
 - `$…` (SCSS/Sass) → suggère les variables Sass.
-- `'{…` ou `dt('…` (TS/JS) → suggère les paths d'objet.
-- Alt+T sur `'{path.in.token}'` → liste les alternatives, remplace l'expression entière (quotes incluses).
+- `'{…` ou `dt('…` (TS/JS) → suggère les paths Style-Dictionary.
+- **`colors.` / `theme.radius.` (TS/JS)** → suggère les jetons runtime indexés (`colors.PRIMARY_500`, `theme.radius.sm`). Trigger requiert au moins un `.` pour ne pas marcher sur la complétion native d'identifiants.
+- *Suggest matching tokens when typing a value* : popup hint quand on tape `fontSize: 3` → liste les tokens dont la valeur résolue commence par `3`. **Ne vole pas le focus** : continuer à taper insère bien dans l'éditeur ; clic souris pour appliquer, Escape pour fermer.
+- Alt+T sur `'{path.in.token}'`, `colors.X`, ou `spacing(N)` → popup d'alternatives, remplace l'expression entière.
 - Inspection / Alt+T sur littéral dans une string TS (`gap: '0.2rem'`) → suggère un `'{token}'` matchant et remplace la string complète.
-- Filtrage par kind selon l'extension : `.ts/.tsx/...` → JS_OBJECT_PATH uniquement, `.scss/.sass` → CSS/SCSS, `.css` → CSS only.
-- Boost contextuel : la catégorie correspondant à la propriété CSS courante remonte ; les familles déjà utilisées dans le même bloc `{}` remontent aussi.
-- Swatch couleur affiché dans la liste pour les tokens COLOR.
+- Filtrage par kind selon l'extension : `.ts/.tsx/...` → `JS_OBJECT_PATH` + `JS_RUNTIME_PROPERTY` + `JS_RUNTIME_FUNCTION`, `.scss/.sass` → SCSS/CSS, `.css` → CSS only.
+- Boost contextuel : la catégorie correspondant à la propriété CSS/JS courante remonte ; les familles déjà utilisées dans le même bloc `{}` remontent aussi.
+- Swatch couleur affiché pour les tokens COLOR ; badge **ƒ** pour les helpers callables.
 
 ## 7. Scopes (multi-UIs dans un même projet)
 
@@ -74,6 +82,8 @@ Catégorisation automatique : `COLOR`, `SPACING`, `TYPOGRAPHY`, `RADIUS`, `SHADO
 - Quand on édite un fichier dans `rootPath`, seuls ce scope + scopes communs (rootPath vide) sont actifs.
 - Cache d'indexation par scope.
 - Édition stable des scopes : modifier les champs d'un scope sélectionné ne contamine plus les autres lors d'un changement de sélection.
+- **Live sync** : ajouter / supprimer / renommer un scope dans les Settings rafraîchit immédiatement le combo de l'Analyser (listener `fireScopesChanged`). Bouton **Re-sync** explicite dans la toolbar Analyser pour un drop forcé du cache.
+- **Analyser scope-aware** : sélectionner un scope dans l'onglet Analyser restreint le file walk aux `rootPath` actifs et n'exclut que les catalogues du scope choisi (réparé en 0.1.2 — auparavant l'analyse scannait tout le projet).
 
 ## 8. Settings (Preferences → Tools → Token Flow)
 

@@ -9,26 +9,37 @@
 Token Flow helps you find the right variable and keep your styles flawless without ever leaving your IntelliJ code.</p>
 
 <p><b>Token Flow</b> indexes your whole Design System and makes token usage fluid, fast and error-proof.<br/>
-Supported formats: SCSS variables, CSS Custom Properties, SCSS Maps, TS/JS preset objects.</p>
+Supported formats: SCSS variables, CSS Custom Properties, SCSS Maps, TS/JS Style-Dictionary presets, <b>React Native runtime themes</b> (property-access objects + callable helpers), CSS-in-JS objects.</p>
 
 <h3>Superpowers for Front-end Developers</h3>
 
 <ul>
   <li><b>Instant Search (Library)</b><br/>
       A dedicated side panel to find tokens by name, value or category.<br/>
-      Includes visual swatches and drag-and-drop support.</li>
+      Includes visual swatches, callable-helper badges (ƒ) and drag-and-drop support.</li>
   <li><b>Smart Swapping <code>(Alt+T)</code></b><br/>
       Need a slightly darker blue or the next spacing scale?<br/>
-      Token Flow suggests siblings based on HSL proximity or logical order.</li>
+      Token Flow suggests siblings based on HSL proximity, logical order, or — for callable helpers — the next step in the scale (<code>spacing(0.5)</code> → <code>spacing(1)</code> → <code>spacing(1.5)</code>).</li>
   <li><b>Zero "Magic Numbers"</b><br/>
-      The IDE flags hardcoded hex codes or pixels that match an existing token.<br/>
+      The IDE flags hardcoded hex codes, pixels, durations <i>and</i> unitless numbers (<code>fontSize: 34</code>) that match an existing token.<br/>
+      Helper-aware suggestions invert your linear functions: a hardcoded <code>12</code> becomes <code>spacing(1.5)</code> when your <code>spacing()</code> helper uses an 8&nbsp;px grid.<br/>
       One click, and your code is clean.</li>
+  <li><b>Suggest matching tokens as you type</b><br/>
+      Type <code>fontSize: 3…</code> or <code>colors.</code> and Token Flow proposes tokens whose value or path matches — without stealing editor focus.</li>
   <li><b>Deep Context</b><br/>
       Hover any token to see its resolved value, aliases and per-mode variants
       (Dark / Light / breakpoints).</li>
   <li><b>Full-scale Audit</b><br/>
       An "Analyse" tab grades your project health.<br/>
-      Identify tech debt, unused tokens and hardcoded clusters in seconds.</li>
+      Identify tech debt, unused tokens and hardcoded clusters in seconds — properly scoped to the catalogue you select.</li>
+</ul>
+
+<h3>Supported Token Authoring Styles</h3>
+
+<ul>
+  <li><b>CSS / SCSS</b> — <code>--var: …</code> custom properties, <code>$var: …</code> Sass variables, SCSS map keys.</li>
+  <li><b>TS/JS Style-Dictionary presets</b> — <code>export const X = {…}</code> with <code>'{a.b.c}'</code> alias references.</li>
+  <li><b>TS/JS React Native &amp; CSS-in-JS themes</b> — <code>const X = {…}</code> and <code>export const X: Type = {…}</code>. Property-access tokens (<code>colors.PRIMARY_500</code>, <code>theme.radius.sm</code>, <code>fontPresets.h1.fontSize</code>) and callable helpers (<code>spacing</code>, <code>radius</code>, …) detected and made actionable.</li>
 </ul>
 
 <h3>Real-world Use Cases</h3>
@@ -60,6 +71,36 @@ Supported formats: SCSS variables, CSS Custom Properties, SCSS Maps, TS/JS prese
     ]]></description>
 
     <change-notes><![CDATA[
+<h3>0.1.2 — React Native support</h3>
+<ul>
+  <li><b>React Native runtime themes</b>: property-access tokens
+      (<code>colors.PRIMARY_500</code>, <code>theme.radius.sm</code>,
+      <code>fontPresets.h1.fontSize</code>) are now detected.
+      Typed <code>export const X: Type = {…}</code> aggregators contribute
+      leaf paths only (aligned with barrel re-exports); bare <code>const X = {…}</code> bags keep their prefix.
+      Cross-object alias resolution included.</li>
+  <li><b>Callable helpers (<code>spacing</code>, <code>radius</code>, …)</b>:
+      linear arrow functions like <code>(v) =&gt; UNIT * v</code> are indexed
+      with a ƒ badge. Hardcoded <code>12</code> now suggests
+      <code>spacing(1.5)</code>. <code>Alt+T</code> on <code>spacing(0.5)</code>
+      opens a scale popup (<code>spacing(0.25)</code>, <code>spacing(0.5)</code>,
+      <code>spacing(1)</code>, <code>spacing(1.5)</code>, …).</li>
+  <li><b>Unitless numerics flagged</b>: <code>fontSize: 34</code>,
+      <code>lineHeight: 24</code>, <code>opacity: 0.5</code> now inspected
+      against the token index (JS/TS only). Numbers inside a helper call are
+      ignored to avoid noise.</li>
+  <li><b>Suggest matching tokens as you type</b>: the value-completion popup
+      no longer steals editor focus — typing keeps going into the file.</li>
+  <li><b>Analyser respects the selected scope</b>: file walk is restricted to
+      the scope's <code>rootPath</code>; only the active scope's own catalogues
+      are excluded. Scope changes in Settings refresh the picker live; a
+      <b>Re-sync</b> action is available for manual cache drops.</li>
+  <li><b>Architecture</b>: TS/JS parsing reorganised into a strategy package
+      (<code>StyleDictionaryParser</code>, <code>RuntimeObjectParser</code>,
+      <code>RuntimeFunctionParser</code>, registry to dispatch per file).
+      Adding a new stack now means plugging in a single class.</li>
+</ul>
+
 <h3>0.1.1 — Polish &amp; bug fixes</h3>
 <ul>
   <li><b>Hover popup — multi-theme grouping</b>: tokens declared under nested
