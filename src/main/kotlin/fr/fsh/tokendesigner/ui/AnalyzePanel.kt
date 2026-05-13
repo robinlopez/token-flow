@@ -27,6 +27,7 @@ import fr.fsh.tokendesigner.analyze.HardcodedOccurrence
 import fr.fsh.tokendesigner.analyze.Incoherence
 import fr.fsh.tokendesigner.analyze.SubScore
 import fr.fsh.tokendesigner.analyze.TokenSourceUsage
+import fr.fsh.tokendesigner.scanner.TokenIndex
 import fr.fsh.tokendesigner.settings.Scope
 import fr.fsh.tokendesigner.settings.ScopeResolver
 import fr.fsh.tokendesigner.settings.TokenSelectorSettings
@@ -102,6 +103,22 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
         addActionListener { /* selection persisted at run-time */ }
     }
 
+    /**
+     * Subscribed to [TokenSelectorSettings.fireScopesChanged] so the combo
+     * mirrors the configured scopes the moment the user clicks **Apply** in
+     * settings — no need to switch tabs, no need to restart the IDE.
+     */
+    private val scopesListener: () -> Unit = {
+        ApplicationManager.getApplication().invokeLater {
+            rebuildScopeCombo()
+            renderEmpty(
+                "Scopes changed — click <b>Run analysis</b> to recompute the report " +
+                    "for the selected scope."
+            )
+            lastReport = null
+        }
+    }
+
     init {
         rebuildScopeCombo()
         setupToolbar()
@@ -110,6 +127,7 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
             border = null
             horizontalScrollBarPolicy = JBScrollPane.HORIZONTAL_SCROLLBAR_NEVER
         })
+        TokenSelectorSettings.getInstance(project).addScopesChangeListener(scopesListener)
     }
 
     private fun rebuildScopeCombo() {
@@ -142,8 +160,25 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
                 runAnalysis()
             }
         }
+        // Hard re-sync: drop every cached token list and rebuild the combo
+        // from scratch. Useful when the user just edited scopes in settings,
+        // or when the VFS listener somehow missed a token-file change. The
+        // automatic listener above covers the common case; this action is the
+        // explicit fallback the user can trigger when the panel "looks stuck".
+        val resync = object : AnAction(
+            "Re-sync scopes",
+            "Drop token caches and re-read scope settings",
+            AllIcons.Actions.ForceRefresh,
+        ) {
+            override fun actionPerformed(e: AnActionEvent) {
+                TokenIndex.getInstance(project).invalidate()
+                rebuildScopeCombo()
+                lastReport = null
+                renderEmpty("Caches cleared — click <b>Run analysis</b> to recompute.")
+            }
+        }
         val toolbar = ActionManager.getInstance()
-            .createActionToolbar("DesignTokenAnalyze", DefaultActionGroup(run, refresh), true)
+            .createActionToolbar("DesignTokenAnalyze", DefaultActionGroup(run, refresh, resync), true)
         toolbar.targetComponent = this
 
         val toolbarRow = JPanel(BorderLayout()).apply {

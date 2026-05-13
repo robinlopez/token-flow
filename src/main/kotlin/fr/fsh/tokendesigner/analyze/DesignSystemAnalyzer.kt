@@ -16,7 +16,6 @@ import fr.fsh.tokendesigner.model.TokenCategory
 import fr.fsh.tokendesigner.scanner.TokenCategorizer
 import fr.fsh.tokendesigner.scanner.TokenIndex
 import fr.fsh.tokendesigner.settings.ScopeResolver
-import fr.fsh.tokendesigner.settings.TokenSelectorSettings
 
 /**
  * Computes a [AnalysisReport] for the project's tokens & code.
@@ -34,7 +33,7 @@ class DesignSystemAnalyzer(private val project: Project) {
 
         val incoherences = detectIncoherences(tokens)
         val duplicates = detectDuplicates(tokens)
-        val coverage = computeCoverage(tokens)
+        val coverage = computeCoverage(tokens, scopeFile)
         val hardcoded = collectHardcodedClusters(tokens, coverage.scannedFiles)
         val unused = tokens.filter { it.name !in coverage.referencedNames }
             .sortedBy { it.name }
@@ -214,14 +213,33 @@ class DesignSystemAnalyzer(private val project: Project) {
         val referencedNames: Set<String>,
     )
 
-    private fun computeCoverage(tokens: List<DesignToken>): CoverageScan {
-        val scope = GlobalSearchScope.projectScope(project)
-        val excluded = excludedRoots()
+    private fun computeCoverage(tokens: List<DesignToken>, scopeFile: VirtualFile?): CoverageScan {
+        val searchScope = GlobalSearchScope.projectScope(project)
+        // Compute which **roots** the analyser is allowed to scan. When the
+        // user picks a specific scope (i.e. `scopeFile` is non-null), we
+        // restrict the file walk to that scope's `rootPath` plus every
+        // common scope — anything outside is irrelevant to the chosen scope
+        // and would dilute the report. With `scopeFile == null` ("All
+        // project") we keep the historic behaviour: every file in the
+        // project's source extensions is fair game.
+        val activeScopes = ScopeResolver.activeScopesFor(project, scopeFile)
+        val rootRestrictions = activeScopes
+            .filter { !it.isCommon }
+            .mapNotNull { ScopeResolver.absolutize(project, it.rootPath) }
+        // Exclude **only the active scopes' source paths** — when the user
+        // analyses scope A, scope B's catalog files are unrelated noise. The
+        // previous code excluded *all* configured source paths globally,
+        // which suppressed useful hits in the scope under analysis.
+        val excluded = activeScopes
+            .flatMap { it.sourcePaths }
+            .mapNotNull { ScopeResolver.absolutize(project, it) }
         val files = mutableListOf<VirtualFile>()
         runReadAction {
             for (ext in COVERAGE_EXTS) {
-                FilenameIndex.getAllFilesByExt(project, ext, scope).forEach { vf ->
-                    if (!isExcluded(vf, excluded)) files += vf
+                FilenameIndex.getAllFilesByExt(project, ext, searchScope).forEach { vf ->
+                    if (rootRestrictions.isNotEmpty() && !isInsideAny(vf, rootRestrictions)) return@forEach
+                    if (isExcluded(vf, excluded)) return@forEach
+                    files += vf
                 }
             }
         }
@@ -291,14 +309,14 @@ class DesignSystemAnalyzer(private val project: Project) {
             }
             .sortedBy { it.ratio }
 
-    private fun excludedRoots(): List<String> {
-        val settings = TokenSelectorSettings.getInstance(project)
-        return settings.allSourcePaths.mapNotNull { ScopeResolver.absolutize(project, it) }
-    }
-
     private fun isExcluded(vf: VirtualFile, excluded: List<String>): Boolean {
         val path = vf.path
         return excluded.any { path == it || path.startsWith("$it/") }
+    }
+
+    private fun isInsideAny(vf: VirtualFile, roots: List<String>): Boolean {
+        val path = vf.path
+        return roots.any { path == it || path.startsWith("$it/") }
     }
 
     // ─── Hardcoded clusters ──────────────────────────────────────────────
@@ -336,6 +354,7 @@ class DesignSystemAnalyzer(private val project: Project) {
                         LiteralFinder.Kind.COLOR -> TokenCategory.COLOR
                         LiteralFinder.Kind.LENGTH -> TokenCategory.SPACING
                         LiteralFinder.Kind.DURATION -> TokenCategory.DURATION
+                        LiteralFinder.Kind.NUMBER -> TokenCategory.SPACING
                     }
                 }
                 val matching = cat?.let { c -> valueIndex.lookup(lit, c).firstOrNull()?.name }

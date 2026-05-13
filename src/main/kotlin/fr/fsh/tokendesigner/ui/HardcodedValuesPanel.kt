@@ -177,7 +177,11 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
     }
 
     private fun compatibleKinds(ext: String?): Set<fr.fsh.tokendesigner.model.TokenKind> = when (ext) {
-        "ts", "tsx", "js", "jsx", "mjs", "cjs" -> setOf(fr.fsh.tokendesigner.model.TokenKind.JS_OBJECT_PATH)
+        "ts", "tsx", "js", "jsx", "mjs", "cjs" -> setOf(
+            fr.fsh.tokendesigner.model.TokenKind.JS_OBJECT_PATH,
+            fr.fsh.tokendesigner.model.TokenKind.JS_RUNTIME_PROPERTY,
+            fr.fsh.tokendesigner.model.TokenKind.JS_RUNTIME_FUNCTION,
+        )
         "scss", "sass" -> setOf(
             fr.fsh.tokendesigner.model.TokenKind.SCSS_VARIABLE,
             fr.fsh.tokendesigner.model.TokenKind.CSS_CUSTOM_PROPERTY,
@@ -192,6 +196,7 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
         val out = mutableListOf<HardcodedRow>()
         val isJs = currentFile?.extension?.lowercase() in JS_EXTS
         for (hit in LiteralFinder.findIn(text)) {
+            if (hit.kind == LiteralFinder.Kind.NUMBER && !isJs) continue
             if (isJs && hit.insidePartialString) continue
             val expected = PropertyContext.detectAt(text, hit.startOffset)
             val propertyName = PropertyContext.detectPropertyNameAt(text, hit.startOffset)
@@ -309,11 +314,8 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
         editor.contentComponent.requestFocusInWindow()
     }
 
-    private fun textForInsertion(token: DesignToken): String = when (token.kind) {
-        TokenKind.SCSS_VARIABLE -> token.name
-        TokenKind.CSS_CUSTOM_PROPERTY -> "var(${token.name})"
-        TokenKind.JS_OBJECT_PATH -> "'{${token.name}}'"
-    }
+    private fun textForInsertion(token: DesignToken): String =
+        fr.fsh.tokendesigner.model.TokenReference.expression(token)
 
     // ─── Toolbar action: Replace Selected ────────────────────────────────
 

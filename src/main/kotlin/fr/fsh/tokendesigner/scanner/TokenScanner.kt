@@ -12,6 +12,7 @@ import fr.fsh.tokendesigner.inspection.DeclarationContext
 import fr.fsh.tokendesigner.model.DesignToken
 import fr.fsh.tokendesigner.model.TokenKind
 import fr.fsh.tokendesigner.model.TokenVariant
+import fr.fsh.tokendesigner.scanner.parsers.JsTokenFileParserRegistry
 import java.nio.file.Paths
 
 @Service(Service.Level.PROJECT)
@@ -116,16 +117,31 @@ class TokenScanner(private val project: Project) {
                 offset = m.range.first,
             )
         }
-        // TS/JS preset files: parse top-level object literals and emit a token
-        // per leaf path → string value.
+        // TS/JS files: dispatch to the right parser (Style-Dictionary preset
+        // vs. runtime object theme). The registry picks one strategy per file
+        // so the index stays free of cross-flavour duplicates. For runtime
+        // files we also extract callable helpers (`spacing`, `radius`, …) so
+        // they show up in the library and feed helper-aware suggestions.
         if (file.extension?.lowercase() in JS_EXTS) {
-            for (leaf in JsObjectTokenParser.parse(text)) {
+            val parsed = JsTokenFileParserRegistry.parseFull(text)
+            val kind = JsTokenFileParserRegistry.parserFor(parsed.mode).kind
+            for (leaf in parsed.leaves) {
                 sink += RawToken(
                     name = leaf.path,
                     rawValue = leaf.value,
-                    kind = TokenKind.JS_OBJECT_PATH,
+                    kind = kind,
                     filePath = path,
                     offset = leaf.offset,
+                )
+            }
+            for (helper in parsed.helpers) {
+                sink += RawToken(
+                    name = helper.name,
+                    rawValue = "${helper.unitSource} × ${helper.paramName}",
+                    kind = TokenKind.JS_RUNTIME_FUNCTION,
+                    filePath = path,
+                    offset = helper.offset,
+                    functionUnit = helper.unit,
                 )
             }
         }
@@ -173,6 +189,11 @@ class TokenScanner(private val project: Project) {
             // object literal rather than a CSS / SCSS chain.
             val primaryLabel = when (primary.kind) {
                 TokenKind.JS_OBJECT_PATH -> TokenNameParser.modeSegmentOf(primary.name)
+                // Runtime tokens are flat property accesses — no light/dark
+                // sibling paths and no surrounding `@media`/theme chain to
+                // surface, so the default "default" column header is fine.
+                TokenKind.JS_RUNTIME_PROPERTY -> null
+                TokenKind.JS_RUNTIME_FUNCTION -> null
                 TokenKind.CSS_CUSTOM_PROPERTY,
                 TokenKind.SCSS_VARIABLE -> DeclarationContext
                     .describeAt(textOf(primary.filePath), primary.offset)
@@ -188,6 +209,7 @@ class TokenScanner(private val project: Project) {
                 offset = primary.offset,
                 variants = variants,
                 primaryConditionLabel = primaryLabel,
+                functionUnit = primary.functionUnit,
             )
         }
     }
@@ -243,6 +265,17 @@ class TokenScanner(private val project: Project) {
                 index[ref]?.let { return resolveValue(it.rawValue, index, seen) }
             }
         }
+        // Runtime property-access alias: `colors.PRIMARY_500` — a bare JS
+        // identifier expression. Common in React-Native themes where one
+        // typed object (`nomTheme`) reuses values from a primitive object
+        // (`colors`). The alias is the value verbatim, no braces.
+        val runtimeAlias = JS_RUNTIME_ALIAS_REGEX.matchEntire(value)
+        if (runtimeAlias != null) {
+            val ref = runtimeAlias.value
+            if (seen.add(ref)) {
+                index[ref]?.let { return resolveValue(it.rawValue, index, seen) }
+            }
+        }
         // JS/TS object-path alias: `{global.modeLight.high.surface.default}`
         val jsAlias = JS_OBJECT_ALIAS_REGEX.matchEntire(value)
         if (jsAlias != null) {
@@ -291,6 +324,7 @@ class TokenScanner(private val project: Project) {
         val kind: TokenKind,
         val filePath: String,
         val offset: Int,
+        val functionUnit: Double? = null,
     )
 
     companion object {
@@ -316,6 +350,11 @@ class TokenScanner(private val project: Project) {
         private val CSS_VAR_CALL_REGEX = Regex("^var\\(\\s*--([A-Za-z_][A-Za-z0-9_-]*)\\s*\\)$")
         // JS/TS Style-Dictionary-style alias: `{a.b.c}` referring to another token path.
         private val JS_OBJECT_ALIAS_REGEX = Regex("^\\{([A-Za-z_][A-Za-z0-9_.-]*)\\}$")
+        // Bare runtime property-access alias: `colors.PRIMARY_500`. At least one
+        // dot is required so we don't treat a plain identifier as an alias.
+        private val JS_RUNTIME_ALIAS_REGEX = Regex(
+            "^[A-Za-z_\$][\\w\$]*(?:\\.[A-Za-z_\$0-9][\\w\$]*)+$"
+        )
 
         fun getInstance(project: Project): TokenScanner =
             project.getService(TokenScanner::class.java)

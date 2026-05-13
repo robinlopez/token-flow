@@ -5,6 +5,7 @@ import com.intellij.codeInspection.ProblemDescriptor
 import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiDocumentManager
 import fr.fsh.tokendesigner.model.TokenKind
+import fr.fsh.tokendesigner.model.TokenReference
 
 /**
  * Replaces a hardcoded value with the appropriate token reference:
@@ -32,11 +33,7 @@ class ReplaceWithTokenFix(
         val absStart = element.textRange.startOffset + rangeInElement.startOffset
         val absEnd = element.textRange.startOffset + rangeInElement.endOffset
 
-        val replacement = when (tokenKind) {
-            TokenKind.SCSS_VARIABLE -> tokenName            // already includes leading `$`
-            TokenKind.CSS_CUSTOM_PROPERTY -> "var($tokenName)"
-            TokenKind.JS_OBJECT_PATH -> "'{$tokenName}'"
-        }
+        val replacement = TokenReference.expression(tokenName, tokenKind)
         document.replaceString(absStart, absEnd, replacement)
         PsiDocumentManager.getInstance(project).commitDocument(document)
     }

@@ -5,6 +5,7 @@ import com.intellij.ui.JBColor
 import com.intellij.util.ui.JBUI
 import fr.fsh.tokendesigner.model.DesignToken
 import fr.fsh.tokendesigner.model.TokenCategory
+import fr.fsh.tokendesigner.model.TokenKind
 import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.Dimension
@@ -26,6 +27,20 @@ class TokenCellRenderer(
     private val panel = JPanel(BorderLayout(JBUI.scale(8), 0))
     private val swatch = RoundSwatch(diameterPx = 18)
     private val nameLabel = JLabel()
+    private val helperBadge = JLabel().apply {
+        // "ƒ" is the conventional mark for a function in most IDEs and
+        // immediately signals that the entry is callable rather than a flat
+        // value. Drawn in a softer accent colour to stay subordinate to the
+        // token name.
+        text = "ƒ"
+        foreground = JBColor.namedColor(
+            "Plugins.tagForeground",
+            JBColor(0x8B5CF6, 0xC4B5FD),
+        )
+        font = font.deriveFont(java.awt.Font.BOLD)
+        border = JBUI.Borders.emptyRight(6)
+        toolTipText = "Callable helper — inserts the function call expression"
+    }
     private val variantBadge = JLabel().apply {
         foreground = JBColor.namedColor("Component.focusColor", JBColor.BLUE)
         font = font.deriveFont(font.size2D - 2f)
@@ -50,6 +65,7 @@ class TokenCellRenderer(
         panel.border = JBUI.Borders.empty(4, 8)
         val nameRow = JPanel(BorderLayout(0, 0)).apply {
             isOpaque = false
+            add(helperBadge, BorderLayout.WEST)
             add(nameLabel, BorderLayout.CENTER)
             add(variantBadge, BorderLayout.EAST)
         }
@@ -72,6 +88,9 @@ class TokenCellRenderer(
     ): Component {
         nameLabel.text = token.name
         valueLabel.text = token.resolvedValue
+        // Helper tokens (`spacing`, `radius(value)`) carry a ƒ badge so users
+        // distinguish callable helpers from flat-value tokens at a glance.
+        helperBadge.isVisible = token.kind == TokenKind.JS_RUNTIME_FUNCTION
 
         if (token.variants.isEmpty()) {
             variantBadge.text = ""

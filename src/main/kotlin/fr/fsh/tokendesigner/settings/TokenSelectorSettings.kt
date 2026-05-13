@@ -51,6 +51,17 @@ class TokenSelectorSettings : PersistentStateComponent<TokenSelectorSettings.Sta
         @JvmField var openOnHover: Boolean = false
         @JvmField var hoverDelayMs: Int = 700
         @JvmField var autocompleteEnabled: Boolean = true
+        /**
+         * When true, the completion contributor also triggers on typed values
+         * (e.g. `padding: 4`) and suggests matching design tokens.
+         */
+        @JvmField var valueCompletionEnabled: Boolean = true
+        /**
+         * Minimum number of characters that must be typed after the property
+         * colon (`:`) before value-based completion is triggered.
+         * 0 = trigger immediately (even on just `property: `).
+         */
+        @JvmField var valueCompletionMinChars: Int = 0
         /** Tool-window icon variant — value must match an [IconVariant] enum name. */
         @JvmField var iconVariant: String = "DEFAULT"
 
@@ -93,6 +104,15 @@ class TokenSelectorSettings : PersistentStateComponent<TokenSelectorSettings.Sta
         get() = state.autocompleteEnabled
         set(value) { state.autocompleteEnabled = value }
 
+    var valueCompletionEnabled: Boolean
+        get() = state.valueCompletionEnabled
+        set(value) { state.valueCompletionEnabled = value }
+
+    /** Minimum characters typed after `:` before value-based completion fires. */
+    var valueCompletionMinChars: Int
+        get() = state.valueCompletionMinChars.coerceAtLeast(0)
+        set(value) { state.valueCompletionMinChars = value.coerceAtLeast(0) }
+
     var iconVariantName: String
         get() = state.iconVariant
         set(value) { state.iconVariant = value }
@@ -105,6 +125,20 @@ class TokenSelectorSettings : PersistentStateComponent<TokenSelectorSettings.Sta
     private val iconChangeListeners = mutableListOf<() -> Unit>()
     fun addIconChangeListener(listener: () -> Unit) { iconChangeListeners += listener }
     fun fireIconChanged() { iconChangeListeners.toList().forEach { it() } }
+
+    /**
+     * Notified after the user adds/removes/edits a scope and clicks **Apply** in
+     * the settings dialog. Live panels (Analyze, Dashboard) subscribe so their
+     * scope-aware widgets — combos, filter chips, cached results — refresh
+     * without needing the IDE restart users used to do in older versions.
+     *
+     * Listeners run on the EDT (settings apply is dispatched there); keep them
+     * cheap or push heavy work into a background task.
+     */
+    private val scopesChangeListeners = mutableListOf<() -> Unit>()
+    fun addScopesChangeListener(listener: () -> Unit) { scopesChangeListeners += listener }
+    fun removeScopesChangeListener(listener: () -> Unit) { scopesChangeListeners -= listener }
+    fun fireScopesChanged() { scopesChangeListeners.toList().forEach { it() } }
 
     /**
      * Backwards compatibility: returns every distinct source path across all

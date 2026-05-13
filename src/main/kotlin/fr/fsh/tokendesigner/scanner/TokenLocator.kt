@@ -28,6 +28,19 @@ object TokenLocator {
         // replacement covers quotes & braces.
         findJsPathReference(text, offset)?.let { return it }
 
+        // Step 0.3: TS/JS callable helper — `spacing(0.5)`, `radius(2)`. The
+        // whole call expression is captured (name + parens + argument) so the
+        // alternatives popup can offer scale variants `spacing(0.25)`,
+        // `spacing(1)`, … and replace the full call atomically. Tried BEFORE
+        // the property chain because `spacing` would otherwise match step 0.5
+        // first as a bare identifier.
+        findHelperCall(text, offset)?.let { return it }
+
+        // Step 0.5: TS/JS runtime property-access chain — `colors.PRIMARY_500`,
+        // `theme.radius.sm`. Requires at least one `.` so a plain identifier
+        // (which IntelliJ already handles) doesn't get hijacked.
+        findRuntimePropertyChain(text, offset)?.let { return it }
+
         // Step 1: expand around the caret over identifier characters.
         // We treat `-` and `_` as part of the identifier — note this means
         // `--name` is fully captured as a single ident range starting with `--`.
@@ -106,6 +119,117 @@ object TokenLocator {
     private fun isPathLike(s: String): Boolean =
         s.isNotEmpty() && s.first().let { it.isLetter() || it == '_' } &&
             s.all { it.isLetterOrDigit() || it == '.' || it == '_' || it == '-' }
+
+    /**
+     * Expands the caret position over a maximal `IDENT(.IDENT)+` chain — what
+     * a React-Native / CSS-in-JS theme usage typically looks like in source:
+     * `colors.PRIMARY_500`, `theme.radius.sm`, `nomTheme.colors.NEUTRAL_700`.
+     *
+     * Returns `null` when:
+     *  - the resulting span contains no `.` (just a plain identifier — let
+     *    IntelliJ's own completion handle it);
+     *  - any segment isn't a valid JS identifier (so `1.5` or `.foo` is
+     *    rejected);
+     *  - the chain is preceded by `$` or `-` (would clash with SCSS / CSS
+     *    custom-property detection downstream).
+     */
+    /**
+     * Detects an `IDENT(ARGS)` call expression around [offset]. Used to lift
+     * `spacing(0.5)` into a single Hit so the alternatives popup can offer
+     * other scale values (`spacing(0.25)`, `spacing(1)`, …) and replace the
+     * whole call. The Hit's name is the full call expression (e.g.
+     * `spacing(0.5)`); downstream popup logic parses it back when needed.
+     *
+     * Limited to single, well-formed calls — nested parens inside ARGS are
+     * skipped because they usually mean we're looking at a chained or
+     * composed expression we shouldn't blindly replace.
+     */
+    private fun findHelperCall(text: CharSequence, offset: Int): Hit? {
+        // Search a `(` to the left and a `)` to the right of [offset]. Bail
+        // on `;`, `\n`, `,`, `}` or an early `)` since those mark statement
+        // boundaries we should never cross.
+        val maxScan = 200
+        var open = -1
+        var i = offset
+        // If the caret is exactly on `(`, treat that as the opening paren.
+        if (i < text.length && text[i] == '(') {
+            open = i
+        }
+        if (open == -1) {
+            var k = offset - 1
+            var leftLimit = maxOf(0, offset - maxScan)
+            var depth = 0
+            while (k >= leftLimit) {
+                val c = text[k]
+                if (c == ')') depth++
+                else if (c == '(') {
+                    if (depth == 0) { open = k; break }
+                    depth--
+                } else if (c == ';' || c == '\n' || c == '{' || c == '}') break
+                k--
+            }
+        }
+        if (open == -1) {
+            // Caret may sit on the helper name with `(` ahead. Expand the
+            // identifier and check the next non-space char.
+            val (s, e) = expandIdent(text, offset)
+            if (e == s) return null
+            var j = e
+            while (j < text.length && text[j].isWhitespace()) j++
+            if (j >= text.length || text[j] != '(') return null
+            open = j
+        }
+        // Find the matching close paren.
+        var close = -1
+        var depth = 1
+        val rightLimit = minOf(text.length, open + maxScan)
+        var j = open + 1
+        while (j < rightLimit) {
+            when (text[j]) {
+                '(' -> depth++
+                ')' -> { depth--; if (depth == 0) { close = j; break } }
+                ';', '\n', '{', '}' -> return null
+            }
+            j++
+        }
+        if (close == -1) return null
+        // Caret must sit somewhere between the start of IDENT and close+1.
+        var idEnd = open
+        while (idEnd > 0 && text[idEnd - 1].isWhitespace()) idEnd--
+        var idStart = idEnd
+        while (idStart > 0 && isIdentChar(text[idStart - 1])) idStart--
+        if (idStart == idEnd) return null
+        if (offset < idStart || offset > close + 1) return null
+        // Reject identifiers preceded by `.` — those are method calls
+        // (`obj.method(…)`) where the bare identifier alone wouldn't resolve
+        // to a token in the index.
+        if (idStart > 0 && text[idStart - 1] == '.') return null
+        val expression = text.subSequence(idStart, close + 1).toString()
+        return Hit(expression, idStart, close + 1)
+    }
+
+    private fun findRuntimePropertyChain(text: CharSequence, offset: Int): Hit? {
+        fun isChainChar(c: Char): Boolean =
+            c.isLetterOrDigit() || c == '_' || c == '$' || c == '.'
+
+        var s = offset
+        while (s > 0 && isChainChar(text[s - 1])) s--
+        var e = offset
+        while (e < text.length && isChainChar(text[e])) e++
+
+        // Trim leading/trailing dots so `colors.` or `.foo.bar` normalise.
+        while (s < e && text[s] == '.') s++
+        while (e > s && text[e - 1] == '.') e--
+        if (e - s < 3) return null
+
+        val name = text.subSequence(s, e).toString()
+        if (!name.contains('.')) return null
+        if (name.split('.').any { seg ->
+                seg.isEmpty() || seg[0].let { !it.isLetter() && it != '_' && it != '$' }
+            }) return null
+        if (s > 0 && (text[s - 1] == '$' || text[s - 1] == '-')) return null
+        return Hit(name, s, e)
+    }
 
     private fun expandIdent(text: CharSequence, offset: Int): Pair<Int, Int> {
         var s = offset

@@ -98,9 +98,14 @@ Tool Window (sidebar) servant de bibliothèque visuelle globale.
 - ✅ TS/JS preset objects (PrimeUIX, Style-Dictionary aliases) avec résolution des aliases multi-niveaux (mode-stripped + lead-segment-strip + suffix-match)
 - ✅ Mode collapsing JS (`token.modeLight.x.y` + `token.modeDark.x.y` → un seul DesignToken canonical avec variantes ; replace + autocomplete préservent le segment de mode original)
 - ✅ Support TS/JS dans Alt+T, hover info, completion, go-to-declaration, inspection hardcoded (skip des partial strings type `box-shadow`)
+- ✅ **React Native / runtime themes** (v0.1.2) : `JS_RUNTIME_PROPERTY` + parsers package (`StyleDictionaryParser`, `RuntimeObjectParser`, `RuntimeFunctionParser`, `JsTokenFileParserRegistry` à dispatch automatique). `const X = {…}` (bag, préfixe conservé) et `export const X: Type = {…}` (typed aggregator → préfixe strippé). Property-access locator (`colors.PRIMARY_500`) + résolution des alias bare-property (`PRIMARY_500: colors.PRIMARY_500`).
+- ✅ **Callable helpers** (v0.1.2) : `JS_RUNTIME_FUNCTION` + arrow functions linéaires `(p) => UNIT * p`. Badge ƒ, suggestions inverses (`12px` → `spacing(1.5)`), popup *scale* sur Alt+T (`spacing(0.25)` → `spacing(10)`).
+- ✅ **Numériques sans unité** (v0.1.2) : `LiteralFinder.Kind.NUMBER` détecte `fontSize: 34` en position propriété-valeur (JS/TS uniquement).
 - ⬜ JSON (Style Dictionary, Tokens Studio)
 - ⬜ Tailwind config natif
 - ⬜ Less / Stylus (si demande)
+- ⬜ Helpers multi-arguments (`normalize(size, ref)`) — actuellement non inversibles
+- ⬜ Helpers polynomiaux / conditionnels (`normalizeFont` avec `if screenWidth < 321`)
 
 ## Phase 6-bis — Onglet « Analyser » 🚧
 
@@ -125,6 +130,8 @@ Exigences UX :
 - ✅ Refresh manuel via toolbar + scope picker (Active editor / All project / Scope: name).
 - ✅ Sections collapsibles avec chevron (Hardcoded / Unused / Token-source usage collapsées par défaut).
 - ✅ Tous les libellés en anglais (cohérent avec le reste du plugin).
+- ✅ **Scope-aware file walk** (v0.1.2) : `DesignSystemAnalyzer.computeCoverage` accepte `scopeFile` et restreint le scan aux `rootPath` des scopes actifs. Exclusion limitée aux catalogues du scope choisi (avant : union globale qui masquait des hits valides).
+- ✅ **Live sync des scopes** (v0.1.2) : `TokenSelectorSettings.fireScopesChanged()` + `AnalyzePanel` listener → combo et report invalidés quand l'utilisateur clique Apply dans Settings. Action *Re-sync* explicite dans la toolbar pour le drop forcé.
 - ⬜ Cache du `AnalysisReport` par signature (tokens + mtimes), évite les re-calculs.
 
 Côté implémentation :
@@ -148,6 +155,9 @@ Côté implémentation :
 - ✅ Smart category : la propriété CSS courante (color/padding/border-radius/…) priorise la catégorie attendue
 - ✅ Smart same-block : les familles déjà utilisées dans le même bloc `{}` sont boostées
 - ✅ Swatch couleur dans la liste de complétion pour les tokens COLOR
+- ✅ Trigger TS/JS Style-Dictionary (`'{path…` , `dt('path…`)
+- ✅ **Trigger TS/JS runtime** (v0.1.2) : `colors.` / `theme.radius.` propose les jetons `JS_RUNTIME_PROPERTY`. Requiert au moins un `.` pour ne pas marcher sur la complétion native.
+- ✅ **Value-completion hint focus-safe** (v0.1.2) : la popup *Suggest matching tokens when typing a value* ne vole plus le focus (`setRequestFocus(false)`). Continuer à taper insère dans le code ; clic souris pour appliquer.
 
 ## Idées en backlog (non priorisées)
 

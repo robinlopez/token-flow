@@ -36,6 +36,27 @@ object JsObjectTokenParser {
     }
 
     /**
+     * Walks a single object literal whose opening `{` sits at [openBraceIndex].
+     * The leaves are collected under [initialPath] (so a runtime parser can
+     * prefix them with the binding name, e.g. `["colors"]`).
+     *
+     * Returns the index just past the matching `}` (or end-of-text on EOF).
+     * Exposed so multiple `JsTokenFileParser` strategies can reuse the same
+     * walker without duplicating the object/array/string skipping logic.
+     */
+    fun parseAt(
+        text: CharSequence,
+        openBraceIndex: Int,
+        initialPath: List<String> = emptyList(),
+    ): List<Leaf> {
+        if (openBraceIndex >= text.length || text[openBraceIndex] != '{') return emptyList()
+        val out = mutableListOf<Leaf>()
+        val deque = ArrayDeque(initialPath)
+        walkObject(text, openBraceIndex + 1, deque, out)
+        return out
+    }
+
+    /**
      * Walks an object starting at [start] (just after the opening `{`), pushing
      * keys onto [path] and emitting leaves into [out]. Returns the index of the
      * character after the matching `}`.
