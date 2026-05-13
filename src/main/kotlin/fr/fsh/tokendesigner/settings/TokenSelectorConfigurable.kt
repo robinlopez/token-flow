@@ -198,7 +198,9 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
     override fun apply() {
         commitDetailToList()
         val s = TokenSelectorSettings.getInstance(project)
-        s.scopes = currentScopes()
+        val newScopes = currentScopes()
+        val scopesChanged = !sameScopes(s.scopes, newScopes)
+        s.scopes = newScopes
         s.openOnHover = hoverCheckBox.isSelected
         s.hoverDelayMs = hoverDelaySpinner.value as Int
         s.autocompleteEnabled = autocompleteCheckBox.isSelected
@@ -209,6 +211,9 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
         s.iconVariantName = newIcon
         if (iconChanged) s.fireIconChanged()
         TokenIndex.getInstance(project).invalidate()
+        // Fire AFTER the index has been invalidated so listeners that re-fetch
+        // tokens (Analyze combo, dashboard refresh) read a fresh state.
+        if (scopesChanged) s.fireScopesChanged()
     }
 
     override fun reset() {

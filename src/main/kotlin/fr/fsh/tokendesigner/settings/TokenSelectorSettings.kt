@@ -127,6 +127,20 @@ class TokenSelectorSettings : PersistentStateComponent<TokenSelectorSettings.Sta
     fun fireIconChanged() { iconChangeListeners.toList().forEach { it() } }
 
     /**
+     * Notified after the user adds/removes/edits a scope and clicks **Apply** in
+     * the settings dialog. Live panels (Analyze, Dashboard) subscribe so their
+     * scope-aware widgets — combos, filter chips, cached results — refresh
+     * without needing the IDE restart users used to do in older versions.
+     *
+     * Listeners run on the EDT (settings apply is dispatched there); keep them
+     * cheap or push heavy work into a background task.
+     */
+    private val scopesChangeListeners = mutableListOf<() -> Unit>()
+    fun addScopesChangeListener(listener: () -> Unit) { scopesChangeListeners += listener }
+    fun removeScopesChangeListener(listener: () -> Unit) { scopesChangeListeners -= listener }
+    fun fireScopesChanged() { scopesChangeListeners.toList().forEach { it() } }
+
+    /**
      * Backwards compatibility: returns every distinct source path across all
      * scopes. Used when no editor file is available (e.g. dashboard "all").
      */
