@@ -287,13 +287,16 @@ object LiteralFinder {
     private val LENGTH_REGEX = Regex(
         "(?<![a-zA-Z0-9_-])-?\\d*\\.?\\d+(?:px|rem|em|vh|vw|vmin|vmax|ch|ex|%)\\b"
     )
-    // Plain numeric in `property: NUMBER[,;\\s)}]` position. Group 1 = the
-    // number range we'll report. Properties anchor the match so we don't
-    // pick up arbitrary numbers inside expressions (`-spacing(0.5)` is left
-    // untouched: the only number there sits inside the parens and isn't
-    // anchored by `IDENT:`).
+    // Plain numeric in `property: NUMBER[,;)}\]\n]` position. Group 1 = the
+    // number range we'll report. The trailing lookahead requires the number
+    // to be the **sole content** of its property-value slot — followed only
+    // by whitespace and then a terminator (`,;)}\]\n`) or end-of-input. That
+    // way CSS shorthand like `border: 1 solid red` (where `1` is followed by
+    // ` solid`) doesn't generate a spurious NUMBER hit, while real RN-style
+    // single-value assignments (`fontSize: 34,`, `radius: 8}`, `opacity: 0.5`
+    // at end of line) match.
     private val NUMBER_PROP_REGEX = Regex(
-        "[A-Za-z_\$][\\w\$]*\\s*:\\s*(-?\\d+(?:\\.\\d+)?)(?![\\w%.\\-])"
+        "[A-Za-z_\$][\\w\$]*\\s*:\\s*(-?\\d+(?:\\.\\d+)?)(?![\\w%.\\-])(?=\\s*[,;)}\\]\\n]|\\s*$)"
     )
     /**
      * `var(--token-name, FALLBACK)` — group 1 is the fallback expression (after

@@ -32,7 +32,9 @@ class GoToTokenDeclarationAction : AnAction() {
         val project = e.project ?: return
         val editor = e.getData(CommonDataKeys.EDITOR) ?: return
         val caret = editor.caretModel.offset
-        val hit = TokenLocator.find(editor.document, caret) ?: run {
+        val ext = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance()
+            .getFile(editor.document)?.extension
+        val hit = TokenLocator.find(editor.document, caret, ext) ?: run {
             JBPopupFactory.getInstance()
                 .createMessage("Place the caret on a design token reference.")
                 .showCenteredInCurrentWindow(project)

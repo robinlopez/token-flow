@@ -23,7 +23,9 @@ class ShowTokenAlternativesAction : AnAction() {
         val caret = editor.caretModel.offset
 
         // 1) Token reference under the caret? (e.g. $var, --var)
-        val tokenHit = TokenLocator.find(editor.document, caret)
+        val ext = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance()
+            .getFile(editor.document)?.extension
+        val tokenHit = TokenLocator.find(editor.document, caret, ext)
         if (tokenHit != null) {
             TokenAlternativesShower.show(project, editor, tokenHit)
             return

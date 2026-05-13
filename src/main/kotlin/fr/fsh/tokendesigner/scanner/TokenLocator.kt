@@ -19,27 +19,40 @@ object TokenLocator {
         val endOffset: Int,      // exclusive
     )
 
-    fun find(document: Document, offset: Int): Hit? {
+    fun find(document: Document, offset: Int, fileExtension: String? = null): Hit? {
         val text = document.charsSequence
         if (offset < 0 || offset > text.length) return null
+
+        // JS/TS-only detectors. Skipped in CSS / SCSS / SASS files because
+        // their syntax overlaps with legitimate CSS constructs:
+        //  - `lighten($color, 10%)` looks like a helper call and would hijack
+        //    the `$color` variable detection (caret sits inside the parens).
+        //  - `.foo.bar` (selector chain) or `utils.rem-calc(…)` (Sass namespace
+        //    call) look like a runtime property chain.
+        // Keeping these gated by extension preserves the historic CSS/SCSS
+        // behaviour while still firing in .ts/.tsx/.js/.jsx files.
+        val isCssLike = fileExtension?.lowercase() in CSS_LIKE_EXTS
 
         // Step 0: TS/JS object-path reference — `'{path.in.token}'` or
         // `dt('path.in.token')`. Whole expression range is returned so the
         // replacement covers quotes & braces.
         findJsPathReference(text, offset)?.let { return it }
 
-        // Step 0.3: TS/JS callable helper — `spacing(0.5)`, `radius(2)`. The
-        // whole call expression is captured (name + parens + argument) so the
-        // alternatives popup can offer scale variants `spacing(0.25)`,
-        // `spacing(1)`, … and replace the full call atomically. Tried BEFORE
-        // the property chain because `spacing` would otherwise match step 0.5
-        // first as a bare identifier.
-        findHelperCall(text, offset)?.let { return it }
+        if (!isCssLike) {
+            // Step 0.3: TS/JS callable helper — `spacing(0.5)`, `radius(2)`.
+            // The whole call expression is captured (name + parens + argument)
+            // so the alternatives popup can offer scale variants
+            // (`spacing(0.25)`, `spacing(1)`, …) and replace the full call
+            // atomically. Tried BEFORE the property chain because `spacing`
+            // would otherwise match step 0.5 first as a bare identifier.
+            findHelperCall(text, offset)?.let { return it }
 
-        // Step 0.5: TS/JS runtime property-access chain — `colors.PRIMARY_500`,
-        // `theme.radius.sm`. Requires at least one `.` so a plain identifier
-        // (which IntelliJ already handles) doesn't get hijacked.
-        findRuntimePropertyChain(text, offset)?.let { return it }
+            // Step 0.5: TS/JS runtime property-access chain —
+            // `colors.PRIMARY_500`, `theme.radius.sm`. Requires at least one
+            // `.` so a plain identifier (which IntelliJ already handles)
+            // doesn't get hijacked.
+            findRuntimePropertyChain(text, offset)?.let { return it }
+        }
 
         // Step 1: expand around the caret over identifier characters.
         // We treat `-` and `_` as part of the identifier — note this means
@@ -276,4 +289,7 @@ object TokenLocator {
 
     private fun isIdentChar(c: Char): Boolean =
         c.isLetterOrDigit() || c == '_' || c == '-'
+
+    /** File extensions where JS/TS-only detectors must be skipped. */
+    private val CSS_LIKE_EXTS = setOf("css", "scss", "sass")
 }

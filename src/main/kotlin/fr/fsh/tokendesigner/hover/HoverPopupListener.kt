@@ -86,7 +86,9 @@ private class HoverMouseListener(
         lastOffset = offset
         alarm.cancelAllRequests()
 
-        val hit = TokenLocator.find(editor.document, offset) ?: return
+        val ext = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance()
+            .getFile(editor.document)?.extension
+        val hit = TokenLocator.find(editor.document, offset, ext) ?: return
         alarm.addRequest({ trigger(hit) }, settings.hoverDelayMs)
     }
 
