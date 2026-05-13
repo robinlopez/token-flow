@@ -54,11 +54,20 @@ class TokenCompletionContributor : CompletionContributor() {
             val cssMatch = if (!isJs) CSS_VAR_PREFIX.find(lineText) else null
             val scssMatch = if (isScssLike) SCSS_VAR_PREFIX.find(lineText) else null
             val jsMatch = if (isJs) JS_PATH_PREFIX.find(lineText) else null
+            // Runtime / object-access prefix (`colors.`, `theme.spacing.`). Only
+            // fires when the typed text already contains a dot — without the
+            // dot we'd compete with the IDE's own JS completion for plain
+            // identifiers, which would be noisy.
+            val jsRuntimeMatch = if (isJs && jsMatch == null) JS_RUNTIME_PREFIX.find(lineText) else null
 
             val context = when {
                 jsMatch != null -> Context(
                     prefix = jsMatch.groupValues[1],
                     kind = TokenKind.JS_OBJECT_PATH,
+                )
+                jsRuntimeMatch != null -> Context(
+                    prefix = jsRuntimeMatch.groupValues[1],
+                    kind = TokenKind.JS_RUNTIME_PROPERTY,
                 )
                 cssMatch != null -> Context(
                     prefix = "--" + cssMatch.groupValues[1],
@@ -188,6 +197,14 @@ class TokenCompletionContributor : CompletionContributor() {
         // Group 1 = the path typed so far.
         val JS_PATH_PREFIX = Regex(
             "(?:[\"'`]\\{|dt\\(\\s*[\"'`])([a-zA-Z][a-zA-Z0-9_.-]*)$"
+        )
+        // Bare property-access prefix in JS/TS code: `colors.`, `theme.radius.`,
+        // `nomTheme.colors.PRIMARY_`. Requires at least one `.` so we don't
+        // shadow regular JS identifier completion. Anchored on a non-identifier
+        // boundary so we don't trigger inside the middle of an unrelated
+        // expression (e.g. `foo.barcolors.x` would not).
+        val JS_RUNTIME_PREFIX = Regex(
+            "(?:^|[^A-Za-z0-9_$.])([A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$]*)*\\.[\\w$]*)$"
         )
         val PROPERTY_PATTERN = Regex("([a-zA-Z][a-zA-Z-]*)\\s*:")
         val NEARBY_VAR = Regex("var\\(\\s*--([a-zA-Z][a-zA-Z0-9_-]*)\\)")

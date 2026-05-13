@@ -432,11 +432,8 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
         OpenFileDescriptor(project, vf, token.offset).navigate(true)
     }
 
-    private fun textForInsertion(token: DesignToken): String = when (token.kind) {
-        TokenKind.SCSS_VARIABLE -> token.name
-        TokenKind.CSS_CUSTOM_PROPERTY -> "var(${token.name})"
-        TokenKind.JS_OBJECT_PATH -> "'{${token.name}}'"
-    }
+    private fun textForInsertion(token: DesignToken): String =
+        fr.fsh.tokendesigner.model.TokenReference.expression(token)
 
     // ─── DnD ──────────────────────────────────────────────────────────────
 

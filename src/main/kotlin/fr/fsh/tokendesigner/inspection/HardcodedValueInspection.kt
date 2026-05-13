@@ -60,6 +60,10 @@ class HardcodedValueInspection : LocalInspectionTool() {
 
         val isJs = ext in JS_EXTS
         for (hit in LiteralFinder.findIn(text)) {
+            // Plain numbers (`fontSize: 34`) only make sense in JS / TS object
+            // syntax — flagging them in CSS would catch every shorthand value
+            // unrelated to tokens.
+            if (hit.kind == LiteralFinder.Kind.NUMBER && !isJs) continue
             // In JS/TS files, a `'{token}'` reference can't be embedded inside
             // a multi-value string (e.g. a CSS `box-shadow` literal): inserting
             // the inner quotes would corrupt the surrounding string. Skip
@@ -114,7 +118,11 @@ class HardcodedValueInspection : LocalInspectionTool() {
     }
 
     private fun compatibleKinds(ext: String): Set<TokenKind> = when (ext) {
-        "ts", "tsx", "js", "jsx", "mjs", "cjs" -> setOf(TokenKind.JS_OBJECT_PATH)
+        "ts", "tsx", "js", "jsx", "mjs", "cjs" -> setOf(
+            TokenKind.JS_OBJECT_PATH,
+            TokenKind.JS_RUNTIME_PROPERTY,
+            TokenKind.JS_RUNTIME_FUNCTION,
+        )
         else -> setOf(TokenKind.SCSS_VARIABLE, TokenKind.CSS_CUSTOM_PROPERTY)
     }
 

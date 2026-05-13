@@ -10,7 +10,22 @@ package fr.fsh.tokendesigner.inspection
  */
 object LiteralFinder {
 
-    enum class Kind { COLOR, LENGTH, DURATION }
+    enum class Kind {
+        COLOR,
+        LENGTH,
+        DURATION,
+        /**
+         * Plain numeric literal in property-value position (`fontSize: 34`,
+         * `radius: 8`, `opacity: 0.5`). Common in React-Native / CSS-in-JS
+         * stylesheets where sizes are unitless. NOT emitted for numbers that
+         * sit inside a function-call's argument list — those are intentional
+         * scale calls (`spacing(0.5)`) and would be misleading to flag.
+         *
+         * Callers in non-JS files should filter these out: CSS shorthand like
+         * `border: 1 solid red` would produce a spurious hit otherwise.
+         */
+        NUMBER,
+    }
 
     /**
      * @property text          Inner literal value, used for token-value lookup
@@ -68,6 +83,20 @@ object LiteralFinder {
             // Avoid double-matching the duration `12s` as length when both regex agree.
             if (out.any { it.startOffset == m.range.first }) continue
             out += expandWrapper(text, m.value, m.range.first, m.range.last + 1, Kind.LENGTH)
+        }
+        // Plain numbers in property-value position. The regex captures the
+        // surrounding `IDENT:` for anchoring; group 1 is the number itself.
+        // We deliberately match here, after LENGTH, so any value already
+        // tagged at the same offset (e.g. `12px`) wins.
+        for (m in NUMBER_PROP_REGEX.findAll(text)) {
+            val numberGroup = m.groups[1] ?: continue
+            val start = numberGroup.range.first
+            val end = numberGroup.range.last + 1
+            val value = numberGroup.value
+            if (isWhitelisted(value)) continue
+            if (isInsideFallback(start, fallbackRanges)) continue
+            if (out.any { it.startOffset == start }) continue
+            out += Hit(value, start, end, Kind.NUMBER)
         }
         return out
     }
@@ -257,6 +286,14 @@ object LiteralFinder {
     private val DURATION_REGEX = Regex("(?<![a-zA-Z0-9_-])-?\\d*\\.?\\d+(?:ms|s)\\b")
     private val LENGTH_REGEX = Regex(
         "(?<![a-zA-Z0-9_-])-?\\d*\\.?\\d+(?:px|rem|em|vh|vw|vmin|vmax|ch|ex|%)\\b"
+    )
+    // Plain numeric in `property: NUMBER[,;\\s)}]` position. Group 1 = the
+    // number range we'll report. Properties anchor the match so we don't
+    // pick up arbitrary numbers inside expressions (`-spacing(0.5)` is left
+    // untouched: the only number there sits inside the parens and isn't
+    // anchored by `IDENT:`).
+    private val NUMBER_PROP_REGEX = Regex(
+        "[A-Za-z_\$][\\w\$]*\\s*:\\s*(-?\\d+(?:\\.\\d+)?)(?![\\w%.\\-])"
     )
     /**
      * `var(--token-name, FALLBACK)` — group 1 is the fallback expression (after
