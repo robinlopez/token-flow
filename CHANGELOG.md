@@ -14,6 +14,9 @@ Format : [Keep a Changelog](https://keepachangelog.com/) — versionning [SemVer
   - `TokenScanner` now automatically strips these flags from extracted values, preventing them from breaking color parsing and alias resolution. [#2](https://github.com/robinlopez/token-flow/issues/2)
   - Alias resolution now works correctly for variables using these modifiers (e.g. `$app-highlight: $app-primary !default;`). [#2](https://github.com/robinlopez/token-flow/issues/2)
   - Color previews now correctly render for declarations using these flags (e.g. `$app-body-fontColor: #333333 !default;`). [#2](https://github.com/robinlopez/token-flow/issues/2)
+- **Ignorer les déclarations de variables dans l'analyse** :
+  - Par défaut, les valeurs littérales affectées à une variable (ex: `$color: #fff`) ne sont plus marquées comme "hardcoded". Cela évite de flagger la définition même de vos tokens.
+  - Ajout d'un nouvel onglet **Analyser** dans les réglages pour permettre de forcer la détection si besoin.
 
 ## [0.1.2] — 2026-05-13
 

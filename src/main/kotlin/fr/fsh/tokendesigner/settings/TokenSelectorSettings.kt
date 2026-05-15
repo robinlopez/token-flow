@@ -64,6 +64,12 @@ class TokenSelectorSettings : PersistentStateComponent<TokenSelectorSettings.Sta
         @JvmField var valueCompletionMinChars: Int = 0
         /** Tool-window icon variant — value must match an [IconVariant] enum name. */
         @JvmField var iconVariant: String = "DEFAULT"
+        /**
+         * When false (default), hardcoded values that are part of a variable
+         * declaration (e.g. `$color: #fff`) are ignored by the inspection.
+         * Useful since tokens must be defined somewhere!
+         */
+        @JvmField var inspectVariableDeclarations: Boolean = false
 
         // Legacy single-list configuration. Kept for backward compatibility:
         // on first load it is migrated into a single common Scope and emptied.
@@ -116,6 +122,10 @@ class TokenSelectorSettings : PersistentStateComponent<TokenSelectorSettings.Sta
     var iconVariantName: String
         get() = state.iconVariant
         set(value) { state.iconVariant = value }
+
+    var inspectVariableDeclarations: Boolean
+        get() = state.inspectVariableDeclarations
+        set(value) { state.inspectVariableDeclarations = value }
 
     /**
      * Listeners are notified after [iconVariantName] changes so live UI

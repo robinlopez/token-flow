@@ -55,6 +55,12 @@ object LiteralFinder {
          * break the surrounding string — JS callers must skip these hits.
          */
         val insidePartialString: Boolean = false,
+        /**
+         * True when the literal is assigned to a variable (e.g. `$color: #fff`
+         * or `--color: #fff`). Useful to filter out definitions from the
+         * "hardcoded values" scan.
+         */
+        val isDeclaration: Boolean = false,
     )
 
     fun findIn(text: CharSequence): List<Hit> {
@@ -66,23 +72,27 @@ object LiteralFinder {
         for (m in HEX_REGEX.findAll(text)) {
             if (isInsideTokenName(text, m.range.first)) continue
             if (isInsideFallback(m.range.first, fallbackRanges)) continue
-            out += expandWrapper(text, m.value, m.range.first, m.range.last + 1, Kind.COLOR)
+            val hit = expandWrapper(text, m.value, m.range.first, m.range.last + 1, Kind.COLOR)
+            out += hit.copy(isDeclaration = isVariableDeclaration(text, m.range.first))
         }
         for (m in FN_COLOR_REGEX.findAll(text)) {
             if (isInsideFallback(m.range.first, fallbackRanges)) continue
-            out += expandWrapper(text, m.value, m.range.first, m.range.last + 1, Kind.COLOR)
+            val hit = expandWrapper(text, m.value, m.range.first, m.range.last + 1, Kind.COLOR)
+            out += hit.copy(isDeclaration = isVariableDeclaration(text, m.range.first))
         }
         for (m in DURATION_REGEX.findAll(text)) {
             if (isWhitelisted(m.value)) continue
             if (isInsideFallback(m.range.first, fallbackRanges)) continue
-            out += expandWrapper(text, m.value, m.range.first, m.range.last + 1, Kind.DURATION)
+            val hit = expandWrapper(text, m.value, m.range.first, m.range.last + 1, Kind.DURATION)
+            out += hit.copy(isDeclaration = isVariableDeclaration(text, m.range.first))
         }
         for (m in LENGTH_REGEX.findAll(text)) {
             if (isWhitelisted(m.value)) continue
             if (isInsideFallback(m.range.first, fallbackRanges)) continue
             // Avoid double-matching the duration `12s` as length when both regex agree.
             if (out.any { it.startOffset == m.range.first }) continue
-            out += expandWrapper(text, m.value, m.range.first, m.range.last + 1, Kind.LENGTH)
+            val hit = expandWrapper(text, m.value, m.range.first, m.range.last + 1, Kind.LENGTH)
+            out += hit.copy(isDeclaration = isVariableDeclaration(text, m.range.first))
         }
         // Plain numbers in property-value position. The regex captures the
         // surrounding `IDENT:` for anchoring; group 1 is the number itself.
@@ -96,7 +106,10 @@ object LiteralFinder {
             if (isWhitelisted(value)) continue
             if (isInsideFallback(start, fallbackRanges)) continue
             if (out.any { it.startOffset == start }) continue
-            out += Hit(value, start, end, Kind.NUMBER)
+            // If the key starts with $ or is --, it's a variable declaration.
+            val key = m.value.substringBefore(':').trim()
+            val isDecl = key.startsWith("$") || key.startsWith("--")
+            out += Hit(value, start, end, Kind.NUMBER, isDeclaration = isDecl)
         }
         return out
     }
@@ -267,6 +280,37 @@ object LiteralFinder {
         if (offset == 0) return false
         val prev = text[offset - 1]
         return prev.isLetterOrDigit() || prev == '_' || prev == '-'
+    }
+
+    /**
+     * Checks if the literal at [offset] is part of a variable declaration
+     * like `$name: ...` or `--name: ...`.
+     */
+    private fun isVariableDeclaration(text: CharSequence, offset: Int): Boolean {
+        var i = offset - 1
+        while (i >= 0 && text[i].isWhitespace()) i--
+        if (i < 0 || text[i] != ':') return false
+
+        i--
+        while (i >= 0 && text[i].isWhitespace()) i--
+        if (i < 0) return false
+
+        // Match variable name backwards
+        var j = i
+        while (j >= 0 && (text[j].isLetterOrDigit() || text[j] == '-' || text[j] == '_')) j--
+
+        if (j < 0) {
+            // Check if we hit the start of the file exactly at the name start
+            return false
+        }
+
+        // SCSS: $name
+        if (text[j] == '$') return true
+
+        // CSS: --name
+        if (text[j] == '-' && j > 0 && text[j - 1] == '-') return true
+
+        return false
     }
 
     private fun isWhitelisted(value: String): Boolean {
