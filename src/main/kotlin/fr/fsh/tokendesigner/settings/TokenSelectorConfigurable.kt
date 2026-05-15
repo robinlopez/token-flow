@@ -69,6 +69,7 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
     private val autocompleteCheckBox = JBCheckBox("Suggest design tokens in code completion (var(--…) and \$…)")
     private val valueCompletionCheckBox = JBCheckBox("Suggest matching tokens when typing a value (e.g. padding: 4…)")
     private val valueCompletionTriggerCombo = javax.swing.JComboBox(ValueCompletionTrigger.entries.toTypedArray())
+    private val inspectVariableDeclarationsCheckBox = JBCheckBox("Detect hardcoded values in variable declarations (e.g. \$color: #fff)")
     private val iconVariantCombo = javax.swing.JComboBox(IconVariant.entries.toTypedArray()).apply {
         // List rows show a 48px preview; the closed combo (index == -1) keeps a
         // compact 16px size so it doesn't blow up the form layout.
@@ -119,6 +120,7 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
         val tabs = com.intellij.ui.components.JBTabbedPane()
         tabs.addTab("Scopes", buildScopesTab())
         tabs.addTab("Triggers", buildTriggerSection())
+        tabs.addTab("Analyser", buildAnalyserTab())
 
         return JPanel(BorderLayout()).apply {
             border = JBUI.Borders.empty(10)
@@ -192,6 +194,7 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
         if (saved.valueCompletionEnabled != valueCompletionCheckBox.isSelected) return true
         if (saved.valueCompletionMinChars != (valueCompletionTriggerCombo.selectedItem as ValueCompletionTrigger).minChars) return true
         if (saved.iconVariantName != (iconVariantCombo.selectedItem as IconVariant).name) return true
+        if (saved.inspectVariableDeclarations != inspectVariableDeclarationsCheckBox.isSelected) return true
         return !sameScopes(saved.scopes, currentScopes())
     }
 
@@ -209,6 +212,7 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
         val newIcon = (iconVariantCombo.selectedItem as IconVariant).name
         val iconChanged = s.iconVariantName != newIcon
         s.iconVariantName = newIcon
+        s.inspectVariableDeclarations = inspectVariableDeclarationsCheckBox.isSelected
         if (iconChanged) s.fireIconChanged()
         TokenIndex.getInstance(project).invalidate()
         // Fire AFTER the index has been invalidated so listeners that re-fetch
@@ -232,6 +236,7 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
         valueCompletionTriggerCombo.selectedItem = ValueCompletionTrigger.fromMinChars(s.valueCompletionMinChars)
         valueCompletionTriggerCombo.isEnabled = s.valueCompletionEnabled
         iconVariantCombo.selectedItem = IconVariant.fromName(s.iconVariantName)
+        inspectVariableDeclarationsCheckBox.isSelected = s.inspectVariableDeclarations
     }
 
     override fun disposeUIResources() {
@@ -459,6 +464,27 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
             add(sectionAppearance)
             add(iconRow)
             add(JPanel().apply { alignmentX = java.awt.Component.LEFT_ALIGNMENT })  // glue
+        }
+    }
+
+    private fun buildAnalyserTab(): JComponent {
+        val sectionHardcoded = sectionLabel("Hardcoded values detection")
+
+        return JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            border = JBUI.Borders.empty(14, 14, 4, 4)
+
+            add(sectionHardcoded)
+            add(inspectVariableDeclarationsCheckBox.apply {
+                alignmentX = java.awt.Component.LEFT_ALIGNMENT
+                toolTipText = "When unchecked (default), literal values assigned to variables are ignored, as they are usually the tokens' own definitions."
+            })
+            add(htmlMultiLine("<span style='color:gray'>Uncheck this to avoid flagging your own token definitions in SCSS/CSS variable files.</span>").apply {
+                border = JBUI.Borders.emptyLeft(26)
+            })
+
+            add(verticalSpacer())
+            add(JPanel().apply { alignmentX = java.awt.Component.LEFT_ALIGNMENT }) // glue
         }
     }
 

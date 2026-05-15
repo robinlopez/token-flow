@@ -16,6 +16,7 @@ import fr.fsh.tokendesigner.model.TokenCategory
 import fr.fsh.tokendesigner.scanner.TokenCategorizer
 import fr.fsh.tokendesigner.scanner.TokenIndex
 import fr.fsh.tokendesigner.settings.ScopeResolver
+import fr.fsh.tokendesigner.settings.TokenSelectorSettings
 
 /**
  * Computes a [AnalysisReport] for the project's tokens & code.
@@ -248,12 +249,14 @@ class DesignSystemAnalyzer(private val project: Project) {
         var literal = 0
         val literalsByFile = mutableMapOf<String, List<LiteralFinder.Hit>>()
         val referenced = mutableSetOf<String>()
+        val settings = TokenSelectorSettings.getInstance(project)
+        val inspectVariableDeclarations = settings.inspectVariableDeclarations
 
         for (vf in files) {
             val text = try {
                 runReadAction { VfsUtilCore.loadText(vf) }
             } catch (_: Exception) { continue }
-            val hits = LiteralFinder.findIn(text)
+            val hits = LiteralFinder.findIn(text).filter { !it.isDeclaration || inspectVariableDeclarations }
             literalsByFile[vf.path] = hits
             literal += hits.size
 
@@ -326,6 +329,8 @@ class DesignSystemAnalyzer(private val project: Project) {
         scannedFiles: List<VirtualFile>,
     ): List<HardcodedCluster> {
         val valueIndex = TokenValueIndex(tokens)
+        val settings = TokenSelectorSettings.getInstance(project)
+        val inspectVariableDeclarations = settings.inspectVariableDeclarations
         // Re-use the per-file literal scan but bucket by canonical literal.
         data class Hit(val file: VirtualFile, val line: Int, val offset: Int)
         val byLiteral = LinkedHashMap<String, MutableList<Hit>>()
@@ -337,6 +342,7 @@ class DesignSystemAnalyzer(private val project: Project) {
             } catch (_: Exception) { continue }
             for (h in LiteralFinder.findIn(text)) {
                 if (h.insidePartialString) continue
+                if (h.isDeclaration && !inspectVariableDeclarations) continue
                 val key = h.text.lowercase()
                 byLiteral.getOrPut(key) { mutableListOf() }
                     .add(Hit(vf, lineFor(text, h.startOffset), h.startOffset))

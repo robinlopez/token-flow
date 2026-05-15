@@ -59,7 +59,13 @@ class HardcodedValueInspection : LocalInspectionTool() {
         val problems = mutableListOf<ProblemDescriptor>()
 
         val isJs = ext in JS_EXTS
+        val settings = TokenSelectorSettings.getInstance(project)
         for (hit in LiteralFinder.findIn(text)) {
+            // By default, we don't flag hardcoded values that are part of a
+            // variable declaration (e.g. `$color: #fff`) because tokens must
+            // be defined somewhere!
+            if (hit.isDeclaration && !settings.inspectVariableDeclarations) continue
+
             // Plain numbers (`fontSize: 34`) only make sense in JS / TS object
             // syntax — flagging them in CSS would catch every shorthand value
             // unrelated to tokens.

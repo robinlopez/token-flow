@@ -35,6 +35,7 @@ import fr.fsh.tokendesigner.model.DesignToken
 import fr.fsh.tokendesigner.model.TokenCategory
 import fr.fsh.tokendesigner.model.TokenKind
 import fr.fsh.tokendesigner.scanner.TokenIndex
+import fr.fsh.tokendesigner.settings.TokenSelectorSettings
 import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.Component
@@ -195,7 +196,11 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
         val valueIndex = TokenValueIndex(tokens)
         val out = mutableListOf<HardcodedRow>()
         val isJs = currentFile?.extension?.lowercase() in JS_EXTS
+        val settings = TokenSelectorSettings.getInstance(project)
+        val inspectVariableDeclarations = settings.inspectVariableDeclarations
+
         for (hit in LiteralFinder.findIn(text)) {
+            if (hit.isDeclaration && !inspectVariableDeclarations) continue
             if (hit.kind == LiteralFinder.Kind.NUMBER && !isJs) continue
             if (isJs && hit.insidePartialString) continue
             val expected = PropertyContext.detectAt(text, hit.startOffset)
