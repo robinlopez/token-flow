@@ -24,13 +24,18 @@ import fr.fsh.tokendesigner.model.DesignToken
 import fr.fsh.tokendesigner.model.TokenKind
 import fr.fsh.tokendesigner.scanner.TokenIndex
 import fr.fsh.tokendesigner.scanner.TokenNameParser
+import fr.fsh.tokendesigner.settings.TokenSelectorSettings
 import java.awt.BorderLayout
+import java.awt.CardLayout
+import java.awt.Cursor
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.datatransfer.StringSelection
 import java.awt.datatransfer.Transferable
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
+import javax.swing.BoxLayout
+import javax.swing.Box
 import javax.swing.DefaultListModel
 import javax.swing.JComponent
 import javax.swing.JMenuItem
@@ -79,6 +84,13 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
     private val collapsedCategories = mutableSetOf<String>()
     private var allTokens: List<DesignToken> = emptyList()
     private val clearFiltersAction = ClearFiltersAction()
+
+    private val gridContainer = JPanel().apply {
+        layout = BoxLayout(this, BoxLayout.Y_AXIS)
+        border = JBUI.Borders.empty()
+    }
+    private val mainContentCards = CardLayout()
+    private val mainContentPanel = JPanel(mainContentCards)
 
     init {
         setupSearch()
@@ -173,6 +185,24 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
         rebuildModel()
     }
 
+    private fun showTokenContextMenu(token: DesignToken, component: java.awt.Component, x: Int, y: Int) {
+        val menu = JPopupMenu().apply {
+            add(JMenuItem("Insert at caret").apply {
+                addActionListener { insertAtCaret(token) }
+            })
+            add(JMenuItem("Open source file").apply {
+                addActionListener { revealInSource(token) }
+            })
+            add(JMenuItem("Copy token name").apply {
+                addActionListener {
+                    java.awt.Toolkit.getDefaultToolkit().systemClipboard
+                        .setContents(StringSelection(token.name), null)
+                }
+            })
+        }
+        menu.show(component, x, y)
+    }
+
     private fun buildContextMenu(): JPopupMenu = JPopupMenu().apply {
         add(JMenuItem("Insert at caret").apply {
             addActionListener {
@@ -241,20 +271,67 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
         val filterButton = RoundIconButton(AllIcons.General.Filter, "Filter token families…") {
             showFamilyFilterPopup(it)
         }
+
+        val viewModeBtn = RoundIconButton(AllIcons.Actions.ListFiles, "View Mode") {}
+        fun updateViewModeBtn() {
+            val mode = TokenSelectorSettings.getInstance(project).dashboardViewMode
+            if (mode == "LIST") {
+                viewModeBtn.currentIcon = AllIcons.Actions.ListFiles
+                viewModeBtn.toolTipText = "Current: List View (Click to switch to Grid)"
+            } else {
+                viewModeBtn.currentIcon = GridIcon(16)
+                viewModeBtn.toolTipText = "Current: Grid View (Click to switch to List)"
+            }
+            viewModeBtn.repaint()
+        }
+
+        viewModeBtn.addActionListener {
+            val mode = TokenSelectorSettings.getInstance(project).dashboardViewMode
+            setViewMode(if (mode == "LIST") "GRID" else "LIST")
+            updateViewModeBtn()
+        }
+        updateViewModeBtn()
+
+        val actionsPanel = JPanel(FlowLayout(FlowLayout.RIGHT, JBUI.scale(6), 0)).apply {
+            isOpaque = false
+            add(viewModeBtn)
+            add(filterButton)
+        }
+        
+        // Use an invisible border to vertically align the search field and the buttons
         val searchRow = JPanel(BorderLayout(JBUI.scale(4), 0)).apply {
+            border = JBUI.Borders.empty(2, 0, 0, 0)
             add(searchField, BorderLayout.CENTER)
-            add(filterButton, BorderLayout.EAST)
+            add(actionsPanel, BorderLayout.EAST)
         }
         val north = JPanel(BorderLayout()).apply {
             border = JBUI.Borders.empty(4, 4, 0, 4)
             add(searchRow, BorderLayout.NORTH)
             add(filesScroll, BorderLayout.SOUTH)
         }
+        
+        val scrollList = JBScrollPane(list).apply { border = null }
+        val scrollGrid = JBScrollPane(gridContainer).apply {
+            border = null
+            horizontalScrollBarPolicy = JBScrollPane.HORIZONTAL_SCROLLBAR_NEVER
+        }
+        mainContentPanel.add(scrollList, "LIST")
+        mainContentPanel.add(scrollGrid, "GRID")
+
         val main = JPanel(BorderLayout()).apply {
             add(north, BorderLayout.NORTH)
-            add(JBScrollPane(list), BorderLayout.CENTER)
+            add(mainContentPanel, BorderLayout.CENTER)
         }
+        
+        val initialMode = TokenSelectorSettings.getInstance(project).dashboardViewMode
+        mainContentCards.show(mainContentPanel, initialMode)
+        
         setContent(main)
+    }
+
+    private fun setViewMode(mode: String) {
+        TokenSelectorSettings.getInstance(project).dashboardViewMode = mode
+        mainContentCards.show(mainContentPanel, mode)
     }
 
     // ─── Data ─────────────────────────────────────────────────────────────
@@ -320,7 +397,50 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
             }
             .toList()
         listModel.clear()
-        RowGrouping.byCategory(filtered, collapsedCategories).forEach(listModel::addElement)
+        gridContainer.removeAll()
+        
+        val grouped = RowGrouping.byCategory(filtered, collapsedCategories)
+        grouped.forEach(listModel::addElement)
+        
+        var currentWrap: JPanel? = null
+        for (row in grouped) {
+            when (row) {
+                is SeparatorPopupRow -> {
+                    val header = PopupRowRenderer().getListCellRendererComponent(list, row, 0, false, false) as JComponent
+                    header.maximumSize = Dimension(Int.MAX_VALUE, header.preferredSize.height)
+                    header.alignmentX = java.awt.Component.LEFT_ALIGNMENT
+                    
+                    if (row.collapsible) {
+                        header.cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                        header.addMouseListener(object : MouseAdapter() {
+                            override fun mouseClicked(e: MouseEvent) {
+                                toggleCollapse(row.groupKey)
+                            }
+                        })
+                    }
+                    gridContainer.add(header)
+                    
+                    if (!row.collapsed) {
+                        currentWrap = JPanel(CssGridLayout(JBUI.scale(180), JBUI.scale(90), JBUI.scale(12), JBUI.scale(12))).apply {
+                            border = JBUI.Borders.empty(4, 8, 12, 8)
+                            alignmentX = java.awt.Component.LEFT_ALIGNMENT
+                        }
+                        gridContainer.add(currentWrap)
+                    } else {
+                        currentWrap = null
+                    }
+                }
+                is TokenPopupRow -> {
+                    currentWrap?.add(TokenCardPanel(
+                        row.token,
+                        onDoubleClick = { insertAtCaret(it) },
+                        onRightClick = { token, e -> showTokenContextMenu(token, e.component, e.x, e.y) }
+                    ))
+                }
+            }
+        }
+        gridContainer.revalidate()
+        gridContainer.repaint()
     }
 
     /**

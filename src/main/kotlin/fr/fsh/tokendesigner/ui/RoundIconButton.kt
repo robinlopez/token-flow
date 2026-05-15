@@ -20,14 +20,14 @@ import javax.swing.JButton
  * Click handler receives `this` so callers can anchor a popup to the button.
  */
 class RoundIconButton(
-    private val icon: Icon,
+    var currentIcon: Icon,
     tooltip: String,
     private val sizePx: Int = DEFAULT_SIZE,
     onClick: (RoundIconButton) -> Unit,
 ) : JButton() {
 
-    constructor(icon: Icon, tooltip: String, onClick: (RoundIconButton) -> Unit) :
-        this(icon, tooltip, DEFAULT_SIZE, onClick)
+    constructor(currentIcon: Icon, tooltip: String, onClick: (RoundIconButton) -> Unit) :
+        this(currentIcon, tooltip, DEFAULT_SIZE, onClick)
 
     init {
         toolTipText = tooltip
@@ -39,6 +39,12 @@ class RoundIconButton(
         margin = JBUI.insets(0)
         addActionListener { onClick(this) }
     }
+
+    var isActive: Boolean = false
+        set(value) {
+            field = value
+            repaint()
+        }
 
     override fun getPreferredSize(): Dimension {
         val side = JBUI.scale(sizePx)
@@ -59,15 +65,16 @@ class RoundIconButton(
             g2.fillOval(x, y, side - 1, side - 1)
             g2.color = JBColor.border()
             g2.drawOval(x, y, side - 1, side - 1)
-            val ix = (width - icon.iconWidth) / 2
-            val iy = (height - icon.iconHeight) / 2
-            icon.paintIcon(this, g2, ix, iy)
+            val ix = (width - currentIcon.iconWidth) / 2
+            val iy = (height - currentIcon.iconHeight) / 2
+            currentIcon.paintIcon(this, g2, ix, iy)
         } finally {
             g2.dispose()
         }
     }
 
     private fun backgroundColor(): Color = when {
+        isActive -> ACTIVE_BG
         model.isPressed -> PRESSED_BG
         model.isRollover -> HOVER_BG
         else -> IDLE_BG
@@ -86,6 +93,10 @@ class RoundIconButton(
         val PRESSED_BG = JBColor.namedColor(
             "Component.focusColor",
             JBColor(Color(0x3574F0), Color(0x375FAD)),
+        )
+        val ACTIVE_BG = JBColor.namedColor(
+            "Plugins.lightSelectionBackground",
+            JBColor(Color(0xD0E1F9), Color(0x2D4366)),
         )
     }
 }

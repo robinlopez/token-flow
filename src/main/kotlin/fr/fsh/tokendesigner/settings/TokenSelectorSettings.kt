@@ -64,6 +64,8 @@ class TokenSelectorSettings : PersistentStateComponent<TokenSelectorSettings.Sta
         @JvmField var valueCompletionMinChars: Int = 0
         /** Tool-window icon variant — value must match an [IconVariant] enum name. */
         @JvmField var iconVariant: String = "DEFAULT"
+        /** Dashboard view mode - "LIST" or "GRID" */
+        @JvmField var dashboardViewMode: String = "LIST"
         /**
          * When false (default), hardcoded values that are part of a variable
          * declaration (e.g. `$color: #fff`) are ignored by the inspection.
@@ -122,6 +124,10 @@ class TokenSelectorSettings : PersistentStateComponent<TokenSelectorSettings.Sta
     var iconVariantName: String
         get() = state.iconVariant
         set(value) { state.iconVariant = value }
+
+    var dashboardViewMode: String
+        get() = state.dashboardViewMode
+        set(value) { state.dashboardViewMode = value }
 
     var inspectVariableDeclarations: Boolean
         get() = state.inspectVariableDeclarations
