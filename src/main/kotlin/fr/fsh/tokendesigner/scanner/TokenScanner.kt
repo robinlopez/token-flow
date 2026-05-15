@@ -87,9 +87,11 @@ class TokenScanner(private val project: Project) {
 
         if (isScss) {
             for (m in SCSS_VAR_REGEX.findAll(text)) {
+                val raw = m.groupValues[2].trim().trimEnd(';').trim()
+                val cleanedRaw = raw.replace(Regex("(?i)!(default|global|important)\\s*$"), "").trim()
                 sink += RawToken(
                     name = "\$" + m.groupValues[1],
-                    rawValue = m.groupValues[2].trim().trimEnd(';').trim(),
+                    rawValue = cleanedRaw,
                     kind = TokenKind.SCSS_VARIABLE,
                     filePath = path,
                     offset = m.range.first,
@@ -109,9 +111,11 @@ class TokenScanner(private val project: Project) {
             }
         }
         for (m in CSS_VAR_REGEX.findAll(text)) {
+            val raw = m.groupValues[2].trim().trimEnd(';').trim()
+            val cleanedRaw = raw.replace(Regex("(?i)!important\\s*$"), "").trim()
             sink += RawToken(
                 name = "--" + m.groupValues[1],
-                rawValue = m.groupValues[2].trim().trimEnd(';').trim(),
+                rawValue = cleanedRaw,
                 kind = TokenKind.CSS_CUSTOM_PROPERTY,
                 filePath = path,
                 offset = m.range.first,

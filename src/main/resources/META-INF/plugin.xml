@@ -61,6 +61,12 @@ Supported formats: SCSS variables, CSS Custom Properties, SCSS Maps, TS/JS prese
     ]]></description>
 
     <change-notes><![CDATA[
+<h3>0.1.3 — Gutter swatches &amp; SCSS modifiers</h3>
+<ul>
+  <li><b>Gutter color swatches for SCSS</b>: variables (<code>$name</code>) now display a color preview icon in the gutter, resolving through the project index (consistent with native CSS variables).</li>
+  <li><b>Robust SCSS/CSS parsing</b>: modifiers like <code>!default</code>, <code>!global</code>, and <code>!important</code> are now stripped during extraction, fixing color previews and alias resolution for flagged tokens.</li>
+</ul>
+
 <h3>0.1.2 — React Native support</h3>
 <ul>
   <li><b>React Native runtime themes</b>: property-access tokens
@@ -149,6 +155,8 @@ Supported formats: SCSS variables, CSS Custom Properties, SCSS Maps, TS/JS prese
         <typedHandler implementation="fr.fsh.tokendesigner.completion.ValueCompletionTypedHandler"/>
 
         <postStartupActivity implementation="fr.fsh.tokendesigner.completion.ValueCompletionStartup"/>
+
+        <colorProvider implementation="fr.fsh.tokendesigner.provider.TokenColorProvider"/>
     </extensions>
 
     <actions>

@@ -2,7 +2,18 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/) — versionning [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.1.3] — 2026-05-15
+
+### Added
+- **Gutter color swatches for SCSS variables** :
+  - Implementation of `TokenColorProvider` (IntelliJ `ElementColorProvider`) allowing SCSS variables (`$color-name`) to display a color preview icon in the editor gutter, consistent with native CSS custom properties.
+  - Integration with the project's real-time `TokenIndex` for accurate visual representation of design tokens.
+
+### Fixed
+- **Handling of SCSS/CSS modifiers (`!default`, `!global`, `!important`)** :
+  - `TokenScanner` now automatically strips these flags from extracted values, preventing them from breaking color parsing and alias resolution. [#2](https://github.com/robinlopez/token-flow/issues/2)
+  - Alias resolution now works correctly for variables using these modifiers (e.g. `$app-highlight: $app-primary !default;`). [#2](https://github.com/robinlopez/token-flow/issues/2)
+  - Color previews now correctly render for declarations using these flags (e.g. `$app-body-fontColor: #333333 !default;`). [#2](https://github.com/robinlopez/token-flow/issues/2)
 
 ## [0.1.2] — 2026-05-13
 
