@@ -130,6 +130,25 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
 
     private fun setupListInteractions() {
         list.addMouseListener(object : MouseAdapter() {
+            override fun mouseReleased(e: MouseEvent) {
+                handlePopup(e)
+            }
+
+            override fun mousePressed(e: MouseEvent) {
+                handlePopup(e)
+            }
+
+            private fun handlePopup(e: MouseEvent) {
+                if (e.isPopupTrigger || javax.swing.SwingUtilities.isRightMouseButton(e)) {
+                    val idx = list.locationToIndex(e.point)
+                    if (idx >= 0) list.selectedIndex = idx
+                    
+                    if (e.isPopupTrigger) {
+                        buildContextMenu().show(list, e.x, e.y)
+                    }
+                }
+            }
+
             override fun mouseClicked(e: MouseEvent) {
                 val idx = list.locationToIndex(e.point).takeIf { it >= 0 } ?: return
                 val row = listModel.get(idx) ?: return
@@ -156,7 +175,6 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
                 updateHover(if (rowIsToken) idx else -1)
             }
         })
-        list.componentPopupMenu = buildContextMenu()
     }
 
     private fun updateHover(newIndex: Int) {
@@ -193,10 +211,11 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
             add(JMenuItem("Open source file").apply {
                 addActionListener { revealInSource(token) }
             })
-            add(JMenuItem("Copy token name").apply {
+            add(JMenuItem("Copy token").apply {
                 addActionListener {
-                    java.awt.Toolkit.getDefaultToolkit().systemClipboard
-                        .setContents(StringSelection(token.name), null)
+                    val expr = textForInsertion(token)
+                    com.intellij.openapi.ide.CopyPasteManager.getInstance()
+                        .setContents(StringSelection(expr))
                 }
             })
         }
@@ -214,11 +233,12 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
                 (list.selectedValue as? TokenPopupRow)?.let { revealInSource(it.token) }
             }
         })
-        add(JMenuItem("Copy token name").apply {
+        add(JMenuItem("Copy token").apply {
             addActionListener {
                 (list.selectedValue as? TokenPopupRow)?.let { row ->
-                    java.awt.Toolkit.getDefaultToolkit().systemClipboard
-                        .setContents(StringSelection(row.token.name), null)
+                    val expr = fr.fsh.tokendesigner.model.TokenReference.expression(row.token)
+                    com.intellij.openapi.ide.CopyPasteManager.getInstance()
+                        .setContents(java.awt.datatransfer.StringSelection(expr))
                 }
             }
         })
@@ -578,5 +598,22 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
             searchField.text = ""
             rebuildModel()
         }
+    }
+
+    override fun getData(dataId: String): Any? {
+        if (com.intellij.openapi.actionSystem.PlatformDataKeys.COPY_PROVIDER.`is`(dataId)) {
+            return object : com.intellij.ide.CopyProvider {
+                override fun performCopy(dataContext: com.intellij.openapi.actionSystem.DataContext) {
+                    val selectedToken = (list.selectedValue as? TokenPopupRow)?.token
+                    if (selectedToken != null) {
+                        val expr = textForInsertion(selectedToken)
+                        com.intellij.openapi.ide.CopyPasteManager.getInstance().setContents(StringSelection(expr))
+                    }
+                }
+                override fun isCopyEnabled(dataContext: com.intellij.openapi.actionSystem.DataContext): Boolean = list.selectedValue is TokenPopupRow
+                override fun isCopyVisible(dataContext: com.intellij.openapi.actionSystem.DataContext): Boolean = true
+            }
+        }
+        return super.getData(dataId)
     }
 }

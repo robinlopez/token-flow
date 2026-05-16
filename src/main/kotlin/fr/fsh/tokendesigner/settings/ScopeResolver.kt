@@ -31,6 +31,16 @@ object ScopeResolver {
                 commons += scope
                 continue
             }
+            
+            val isSourcePath = scope.sourcePaths.any { src ->
+                val srcAbs = absolutize(project, src)
+                srcAbs != null && (filePath == srcAbs || filePath.startsWith("$srcAbs/"))
+            }
+            if (isSourcePath) {
+                specificMatches += scope to filePath.length
+                continue
+            }
+
             val rootAbsolute = absolutize(project, scope.rootPath) ?: continue
             if (filePath == rootAbsolute || filePath.startsWith("$rootAbsolute/")) {
                 specificMatches += scope to rootAbsolute.length
