@@ -84,6 +84,11 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
     private val collapsedCategories = mutableSetOf<String>()
     private var allTokens: List<DesignToken> = emptyList()
     private val clearFiltersAction = ClearFiltersAction()
+    
+    private val scopeLabel = com.intellij.ui.components.JBLabel("Scope: All project").apply {
+        foreground = com.intellij.ui.JBColor.GRAY
+        font = com.intellij.util.ui.JBFont.small()
+    }
 
     private val gridContainer = JPanel().apply {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
@@ -324,9 +329,17 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
             add(searchField, BorderLayout.CENTER)
             add(actionsPanel, BorderLayout.EAST)
         }
+        val scopeRow = JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(4), 0)).apply {
+            isOpaque = false
+            border = JBUI.Borders.empty(0, 0, 4, 0)
+            add(scopeLabel)
+            add(ScopeUIUtils.createScopeHelpButton(project))
+        }
+
         val north = JPanel(BorderLayout()).apply {
             border = JBUI.Borders.empty(4, 4, 0, 4)
-            add(searchRow, BorderLayout.NORTH)
+            add(scopeRow, BorderLayout.NORTH)
+            add(searchRow, BorderLayout.CENTER)
             add(filesScroll, BorderLayout.SOUTH)
         }
         
@@ -362,6 +375,23 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
         // rather than the union of every scope. Falls back to all tokens when
         // no editor is selected (e.g. on plugin startup before any file is open).
         val activeFile = FileEditorManager.getInstance(project).selectedEditor?.file
+        
+        val configuredScopes = TokenSelectorSettings.getInstance(project).scopes
+        if (configuredScopes.isEmpty()) {
+            scopeLabel.text = "Scope: All project"
+            scopeLabel.toolTipText = "No scopes configured"
+        } else {
+            val active = fr.fsh.tokendesigner.settings.ScopeResolver.activeScopesFor(project, activeFile)
+            if (active.isEmpty()) {
+                scopeLabel.text = "Scope: None"
+                scopeLabel.toolTipText = "No tokens available for this file"
+            } else {
+                val names = active.map { if (it.isCommon) "Common" else it.name.ifBlank { "Unnamed" } }
+                scopeLabel.text = "Scope: ${names.joinToString(", ")}"
+                scopeLabel.toolTipText = "Tokens filtered for the current file"
+            }
+        }
+        
         object : Task.Backgroundable(project, "Loading design tokens", false) {
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = true

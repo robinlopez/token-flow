@@ -128,6 +128,18 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
             horizontalScrollBarPolicy = JBScrollPane.HORIZONTAL_SCROLLBAR_NEVER
         })
         TokenSelectorSettings.getInstance(project).addScopesChangeListener(scopesListener)
+        setupEditorTracking()
+    }
+    
+    private fun setupEditorTracking() {
+        project.messageBus.connect(project).subscribe(
+            com.intellij.openapi.fileEditor.FileEditorManagerListener.FILE_EDITOR_MANAGER,
+            object : com.intellij.openapi.fileEditor.FileEditorManagerListener {
+                override fun selectionChanged(event: com.intellij.openapi.fileEditor.FileEditorManagerEvent) {
+                    rebuildScopeCombo()
+                }
+            }
+        )
     }
 
     private fun rebuildScopeCombo() {
@@ -141,7 +153,25 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
             val rep = representativeFileFor(scope) ?: continue
             scopeCombo.addItem(ScopeChoice("Scope: ${scope.name.ifBlank { "(unnamed)" }}", rep))
         }
-        if (scopeCombo.itemCount > 1) scopeCombo.selectedIndex = 1
+        
+        if (activeFile != null) {
+            val activeScopes = ScopeResolver.activeScopesFor(project, activeFile)
+            val deepest = activeScopes.lastOrNull { !it.isCommon }
+            if (deepest != null) {
+                val targetName = "Scope: ${deepest.name.ifBlank { "(unnamed)" }}"
+                var found = false
+                for (i in 0 until scopeCombo.itemCount) {
+                    if (scopeCombo.getItemAt(i).label == targetName) {
+                        scopeCombo.selectedIndex = i
+                        found = true
+                        break
+                    }
+                }
+                if (!found && scopeCombo.itemCount > 1) scopeCombo.selectedIndex = 1
+            } else {
+                scopeCombo.selectedIndex = 0
+            }
+        }
     }
 
     private fun representativeFileFor(scope: Scope): VirtualFile? {
@@ -186,6 +216,7 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
             val rightSide = JPanel(FlowLayout(FlowLayout.RIGHT, JBUI.scale(6), 0)).apply {
                 add(JBLabel("Scope:").apply { foreground = JBColor.GRAY })
                 add(scopeCombo)
+                add(ScopeUIUtils.createScopeHelpButton(project))
             }
             add(rightSide, BorderLayout.EAST)
         }
