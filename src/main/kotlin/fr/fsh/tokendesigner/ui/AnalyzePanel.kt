@@ -71,7 +71,10 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
             direction: Int,
         ): Int = visibleRect.height
         override fun getScrollableTracksViewportWidth(): Boolean = true
-        override fun getScrollableTracksViewportHeight(): Boolean = false
+        override fun getScrollableTracksViewportHeight(): Boolean {
+            val vp = parent as? javax.swing.JViewport ?: return false
+            return vp.height > preferredSize.height
+        }
     }.apply {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         border = JBUI.Borders.empty(12, 16)
@@ -227,7 +230,7 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
         (scopeCombo.selectedItem as? ScopeChoice)?.representative
 
     private fun runAnalysis() {
-        renderEmpty("Analysing — scanning project files…")
+        renderEmpty("Analysing — scanning project files…", showSpinner = true)
         val scopeFile = selectedScopeFile()
         val scopeLabel = (scopeCombo.selectedItem as? ScopeChoice)?.label ?: "All project"
         object : Task.Backgroundable(project, "Analysing design system", false) {
@@ -244,12 +247,25 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
 
     // ─── Rendering ────────────────────────────────────────────────────────
 
-    private fun renderEmpty(html: String) {
+    private fun renderEmpty(html: String, showSpinner: Boolean = false) {
         content.removeAll()
-        content.add(JBLabel("<html>$html</html>").apply {
-            alignmentX = Component.LEFT_ALIGNMENT
-            border = JBUI.Borders.empty(40)
-        })
+        val label = JBLabel("<html><div style='text-align:center;'>$html</div></html>").apply {
+            alignmentX = Component.CENTER_ALIGNMENT
+            horizontalAlignment = javax.swing.SwingConstants.CENTER
+            foreground = JBColor.GRAY
+        }
+        
+        content.add(Box.createVerticalGlue())
+        if (showSpinner) {
+            val spinner = com.intellij.util.ui.AsyncProcessIcon("AnalysisSpinner").apply {
+                alignmentX = Component.CENTER_ALIGNMENT
+            }
+            content.add(spinner)
+            content.add(Box.createVerticalStrut(JBUI.scale(16)))
+        }
+        content.add(label)
+        content.add(Box.createVerticalGlue())
+        
         content.revalidate()
         content.repaint()
     }
