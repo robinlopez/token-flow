@@ -61,6 +61,14 @@ Supported formats: SCSS variables, CSS Custom Properties, SCSS Maps, TS/JS prese
     ]]></description>
 
     <change-notes><![CDATA[
+<h3>0.1.5 — Refined Scanning &amp; UI Harmonization</h3>
+<ul>
+  <li><b>Scope Awareness</b>: Active scope display added to the Hardcoded Values panel.</li>
+  <li><b>Named Colors Support</b>: Scanner now detects standard CSS named colors (red, blue, transparent, etc.).</li>
+  <li><b>Comment Filtering</b>: Values inside comments are now correctly ignored by the scanner.</li>
+  <li><b>UI Harmonization</b>: Scope information is now right-aligned in toolbars across all panels.</li>
+</ul>
+
 <h3>0.1.4 — Visual Grid &amp; Polished UX</h3>
 <ul>
   <li><b>Design System Dashboard - Grid View</b>: New visual mode representing tokens as beautiful, interactive cards. Includes visual previews for colors, spacing, and radius.</li>

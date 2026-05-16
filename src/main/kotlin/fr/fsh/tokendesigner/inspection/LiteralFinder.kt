@@ -65,30 +65,38 @@ object LiteralFinder {
 
     fun findIn(text: CharSequence): List<Hit> {
         val out = mutableListOf<Hit>()
-        // Compute fallback ranges first; any literal living inside them is part
-        // of a `var(--name, fallback)` safety net and must NOT be flagged.
+        // Compute fallback and comment ranges first; any literal inside them must NOT be flagged.
         val fallbackRanges = computeFallbackRanges(text)
+        val commentRanges = computeCommentRanges(text)
+
+        fun isIgnored(offset: Int): Boolean =
+            isInsideFallback(offset, fallbackRanges) || commentRanges.any { offset in it }
 
         for (m in HEX_REGEX.findAll(text)) {
             if (isInsideTokenName(text, m.range.first)) continue
-            if (isInsideFallback(m.range.first, fallbackRanges)) continue
+            if (isIgnored(m.range.first)) continue
             val hit = expandWrapper(text, m.value, m.range.first, m.range.last + 1, Kind.COLOR)
             out += hit.copy(isDeclaration = isVariableDeclaration(text, m.range.first))
         }
         for (m in FN_COLOR_REGEX.findAll(text)) {
-            if (isInsideFallback(m.range.first, fallbackRanges)) continue
+            if (isIgnored(m.range.first)) continue
+            val hit = expandWrapper(text, m.value, m.range.first, m.range.last + 1, Kind.COLOR)
+            out += hit.copy(isDeclaration = isVariableDeclaration(text, m.range.first))
+        }
+        for (m in NAMED_COLOR_REGEX.findAll(text)) {
+            if (isIgnored(m.range.first)) continue
             val hit = expandWrapper(text, m.value, m.range.first, m.range.last + 1, Kind.COLOR)
             out += hit.copy(isDeclaration = isVariableDeclaration(text, m.range.first))
         }
         for (m in DURATION_REGEX.findAll(text)) {
             if (isWhitelisted(m.value)) continue
-            if (isInsideFallback(m.range.first, fallbackRanges)) continue
+            if (isIgnored(m.range.first)) continue
             val hit = expandWrapper(text, m.value, m.range.first, m.range.last + 1, Kind.DURATION)
             out += hit.copy(isDeclaration = isVariableDeclaration(text, m.range.first))
         }
         for (m in LENGTH_REGEX.findAll(text)) {
             if (isWhitelisted(m.value)) continue
-            if (isInsideFallback(m.range.first, fallbackRanges)) continue
+            if (isIgnored(m.range.first)) continue
             // Avoid double-matching the duration `12s` as length when both regex agree.
             if (out.any { it.startOffset == m.range.first }) continue
             val hit = expandWrapper(text, m.value, m.range.first, m.range.last + 1, Kind.LENGTH)
@@ -104,7 +112,7 @@ object LiteralFinder {
             val end = numberGroup.range.last + 1
             val value = numberGroup.value
             if (isWhitelisted(value)) continue
-            if (isInsideFallback(start, fallbackRanges)) continue
+            if (isIgnored(start)) continue
             if (out.any { it.startOffset == start }) continue
             // If the key starts with $ or is --, it's a variable declaration.
             val key = m.value.substringBefore(':').trim()
@@ -272,6 +280,18 @@ object LiteralFinder {
         ranges.any { offset in it }
 
     /**
+     * Returns ranges of both block (`/* ... */`) and line (`// ...`) comments.
+     */
+    private fun computeCommentRanges(text: CharSequence): List<IntRange> {
+        val ranges = mutableListOf<IntRange>()
+        val blockRegex = Regex("/\\*.*?\\*/", RegexOption.DOT_MATCHES_ALL)
+        for (m in blockRegex.findAll(text)) ranges += m.range
+        val lineRegex = Regex("//.*")
+        for (m in lineRegex.findAll(text)) ranges += m.range
+        return ranges
+    }
+
+    /**
      * Hex colors should not be inspected when they appear inside a token name
      * (e.g. `--color-#fff` would be unusual but defensive). For now the regex
      * already requires word-boundary; this is here as a safety net.
@@ -325,6 +345,11 @@ object LiteralFinder {
     // Functional color forms; we keep the parentheses inside the match for replacement.
     private val FN_COLOR_REGEX = Regex(
         "(?<![a-zA-Z0-9_-])(?:rgb|rgba|hsl|hsla|hwb)\\(\\s*[^)]*\\)",
+        RegexOption.IGNORE_CASE,
+    )
+    // Named colors
+    private val NAMED_COLOR_REGEX = Regex(
+        "(?<![a-zA-Z0-9_-])(?:transparent|black|white|red|green|blue|yellow|orange|purple|gray|grey|pink|brown)\\b(?!-)",
         RegexOption.IGNORE_CASE,
     )
     private val DURATION_REGEX = Regex("(?<![a-zA-Z0-9_-])-?\\d*\\.?\\d+(?:ms|s)\\b")

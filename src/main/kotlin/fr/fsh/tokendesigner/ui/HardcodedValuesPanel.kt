@@ -88,6 +88,11 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
 
     @Volatile private var currentFile: VirtualFile? = null
 
+    private val scopeLabel = JBLabel("Scope: None").apply {
+        foreground = JBColor.GRAY
+        font = com.intellij.util.ui.JBFont.small()
+    }
+
     init {
         setupToolbar()
         setupContent()
@@ -115,7 +120,17 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
         val group = DefaultActionGroup(refresh, replaceSelectedAction, replaceAll)
         val toolbar = ActionManager.getInstance().createActionToolbar("DesignTokenHardcoded", group, true)
         toolbar.targetComponent = this
-        setToolbar(toolbar.component)
+
+        val topToolbarRow = JPanel(BorderLayout()).apply {
+            add(toolbar.component, BorderLayout.WEST)
+            val scopeBox = JPanel(java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, JBUI.scale(6), 0)).apply {
+                isOpaque = false
+                add(scopeLabel)
+                add(ScopeUIUtils.createScopeHelpButton(project))
+            }
+            add(scopeBox, BorderLayout.EAST)
+        }
+        setToolbar(topToolbarRow)
     }
 
     private fun setupContent() {
@@ -157,6 +172,16 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
                     ".ts / .tsx / .js / .jsx files.<br/>Active: ${file.name}"
             )
             return
+        }
+
+        val scopes = fr.fsh.tokendesigner.settings.ScopeResolver.activeScopesFor(project, file)
+        val deepest = scopes.lastOrNull { !it.isCommon }
+        scopeLabel.text = if (deepest != null) {
+            "Scope: ${deepest.name.ifBlank { "(unnamed)" }}"
+        } else if (scopes.isNotEmpty()) {
+            "Scope: Common"
+        } else {
+            "Scope: None"
         }
 
         object : Task.Backgroundable(project, "Scanning hardcoded values", false) {

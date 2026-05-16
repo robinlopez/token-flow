@@ -2,6 +2,18 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/) — versionning [SemVer](https://semver.org/).
 
+## [0.1.5] — 2026-05-16
+
+### Added
+- **Scope display in Hardcoded Values** : Active scope is now visible in the Hardcoded Values panel.
+- **CSS Named Colors detection** : Scanner now identifies named colors as hardcoded values.
+
+### Fixed
+- **Comments ignored in scanner** : Values inside code comments are no longer detected.
+
+### Changed
+- **UI Harmonization** : Scope info is now right-aligned in toolbars for better space optimization.
+
 ## [0.1.4] — 2026-05-15
 
 ### Added

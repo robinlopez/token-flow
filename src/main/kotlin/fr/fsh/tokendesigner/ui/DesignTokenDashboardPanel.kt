@@ -280,7 +280,17 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
         val toolbar = ActionManager.getInstance()
             .createActionToolbar("DesignTokenDashboard", group, true)
         toolbar.targetComponent = this
-        setToolbar(toolbar.component)
+        
+        val topToolbarRow = JPanel(BorderLayout()).apply {
+            add(toolbar.component, BorderLayout.WEST)
+            val scopeBox = JPanel(java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, JBUI.scale(6), 0)).apply {
+                isOpaque = false
+                add(scopeLabel)
+                add(ScopeUIUtils.createScopeHelpButton(project))
+            }
+            add(scopeBox, BorderLayout.EAST)
+        }
+        setToolbar(topToolbarRow)
     }
 
     private fun setupContent() {
@@ -329,16 +339,8 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
             add(searchField, BorderLayout.CENTER)
             add(actionsPanel, BorderLayout.EAST)
         }
-        val scopeRow = JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(4), 0)).apply {
-            isOpaque = false
-            border = JBUI.Borders.empty(0, 0, 4, 0)
-            add(scopeLabel)
-            add(ScopeUIUtils.createScopeHelpButton(project))
-        }
-
         val north = JPanel(BorderLayout()).apply {
             border = JBUI.Borders.empty(4, 4, 0, 4)
-            add(scopeRow, BorderLayout.NORTH)
             add(searchRow, BorderLayout.CENTER)
             add(filesScroll, BorderLayout.SOUTH)
         }
