@@ -71,7 +71,10 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
             direction: Int,
         ): Int = visibleRect.height
         override fun getScrollableTracksViewportWidth(): Boolean = true
-        override fun getScrollableTracksViewportHeight(): Boolean = false
+        override fun getScrollableTracksViewportHeight(): Boolean {
+            val vp = parent as? javax.swing.JViewport ?: return false
+            return vp.height > preferredSize.height
+        }
     }.apply {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         border = JBUI.Borders.empty(12, 16)
@@ -128,6 +131,18 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
             horizontalScrollBarPolicy = JBScrollPane.HORIZONTAL_SCROLLBAR_NEVER
         })
         TokenSelectorSettings.getInstance(project).addScopesChangeListener(scopesListener)
+        setupEditorTracking()
+    }
+    
+    private fun setupEditorTracking() {
+        project.messageBus.connect(project).subscribe(
+            com.intellij.openapi.fileEditor.FileEditorManagerListener.FILE_EDITOR_MANAGER,
+            object : com.intellij.openapi.fileEditor.FileEditorManagerListener {
+                override fun selectionChanged(event: com.intellij.openapi.fileEditor.FileEditorManagerEvent) {
+                    rebuildScopeCombo()
+                }
+            }
+        )
     }
 
     private fun rebuildScopeCombo() {
@@ -141,7 +156,25 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
             val rep = representativeFileFor(scope) ?: continue
             scopeCombo.addItem(ScopeChoice("Scope: ${scope.name.ifBlank { "(unnamed)" }}", rep))
         }
-        if (scopeCombo.itemCount > 1) scopeCombo.selectedIndex = 1
+        
+        if (activeFile != null) {
+            val activeScopes = ScopeResolver.activeScopesFor(project, activeFile)
+            val deepest = activeScopes.lastOrNull { !it.isCommon }
+            if (deepest != null) {
+                val targetName = "Scope: ${deepest.name.ifBlank { "(unnamed)" }}"
+                var found = false
+                for (i in 0 until scopeCombo.itemCount) {
+                    if (scopeCombo.getItemAt(i).label == targetName) {
+                        scopeCombo.selectedIndex = i
+                        found = true
+                        break
+                    }
+                }
+                if (!found && scopeCombo.itemCount > 1) scopeCombo.selectedIndex = 1
+            } else {
+                scopeCombo.selectedIndex = 0
+            }
+        }
     }
 
     private fun representativeFileFor(scope: Scope): VirtualFile? {
@@ -186,6 +219,7 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
             val rightSide = JPanel(FlowLayout(FlowLayout.RIGHT, JBUI.scale(6), 0)).apply {
                 add(JBLabel("Scope:").apply { foreground = JBColor.GRAY })
                 add(scopeCombo)
+                add(ScopeUIUtils.createScopeHelpButton(project))
             }
             add(rightSide, BorderLayout.EAST)
         }
@@ -196,7 +230,7 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
         (scopeCombo.selectedItem as? ScopeChoice)?.representative
 
     private fun runAnalysis() {
-        renderEmpty("Analysing — scanning project files…")
+        renderEmpty("Analysing — scanning project files…", showSpinner = true)
         val scopeFile = selectedScopeFile()
         val scopeLabel = (scopeCombo.selectedItem as? ScopeChoice)?.label ?: "All project"
         object : Task.Backgroundable(project, "Analysing design system", false) {
@@ -213,12 +247,25 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
 
     // ─── Rendering ────────────────────────────────────────────────────────
 
-    private fun renderEmpty(html: String) {
+    private fun renderEmpty(html: String, showSpinner: Boolean = false) {
         content.removeAll()
-        content.add(JBLabel("<html>$html</html>").apply {
-            alignmentX = Component.LEFT_ALIGNMENT
-            border = JBUI.Borders.empty(40)
-        })
+        val label = JBLabel("<html><div style='text-align:center;'>$html</div></html>").apply {
+            alignmentX = Component.CENTER_ALIGNMENT
+            horizontalAlignment = javax.swing.SwingConstants.CENTER
+            foreground = JBColor.GRAY
+        }
+        
+        content.add(Box.createVerticalGlue())
+        if (showSpinner) {
+            val spinner = com.intellij.util.ui.AsyncProcessIcon("AnalysisSpinner").apply {
+                alignmentX = Component.CENTER_ALIGNMENT
+            }
+            content.add(spinner)
+            content.add(Box.createVerticalStrut(JBUI.scale(16)))
+        }
+        content.add(label)
+        content.add(Box.createVerticalGlue())
+        
         content.revalidate()
         content.repaint()
     }
