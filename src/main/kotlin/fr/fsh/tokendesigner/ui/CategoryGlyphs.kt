@@ -13,6 +13,12 @@ object CategoryGlyphs {
         TokenCategory.TYPOGRAPHY -> "T"
         TokenCategory.DURATION -> "⏱"
         TokenCategory.Z_INDEX -> "≡"
+        TokenCategory.EFFECTS -> "✨"
+        TokenCategory.LAYOUT -> "⊞"
+        TokenCategory.SIZING -> "⤢"
+        TokenCategory.BORDER -> "◨"
+        TokenCategory.OPACITY -> "◐"
+        TokenCategory.ICON -> "★"
         TokenCategory.OTHER -> "·"
         null -> "?"
     }

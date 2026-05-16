@@ -9,6 +9,15 @@ Format : [Keep a Changelog](https://keepachangelog.com/) — versionning [SemVer
   - New visual grid mode for tokens, offering a much more visual and modern alternative to the list view.
   - **Token Cards** : Each token is represented by a card with visual previews (color circles, radius boxes, spacing indicators), action buttons (copy, info), and modern rounded aesthetics.
   - **Persistence** : Selected view mode (List/Grid) is saved per project.
+- **New Token Categories** : Added more precise categorization for better organization:
+  - **`EFFECTS`**, **`LAYOUT`**, **`SIZING`**, **`BORDER`**, **`OPACITY`**, et **`ICON`**.
+  - **Enriched existing categories** : `COLOR`, `TYPOGRAPHY`, `SHADOW`, `DURATION`, and `SPACING` now recognize a much wider range of semantic keywords (e.g., surface, gradient, kerning, viewport, etc.).
+  - **Strict evaluation order** : Prevents collisions by ensuring composite keywords (like `border-color` or `box-shadow`) are correctly evaluated before their root words.
+
+### Fixed
+- **Incorrect token categorization for Z-INDEX** :
+  - Tokens are no longer classified as `Z-INDEX` solely based on having a small integer value (e.g. `$breakpoint-phone: 0` or `--grid-columns: 4`).
+  - The categorization logic now prioritizes naming conventions, correctly identifying tokens containing `z-index`, `layer`, `depth`, or `elevation` as Z-INDEX, while letting other integer values fall through to their correct context or `OTHER`.
 
 ## [0.1.3] — 2026-05-15
 

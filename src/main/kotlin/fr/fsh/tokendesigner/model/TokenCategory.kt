@@ -8,5 +8,11 @@ enum class TokenCategory {
     RADIUS,
     DURATION,
     Z_INDEX,
+    EFFECTS,
+    LAYOUT,
+    SIZING,
+    BORDER,
+    OPACITY,
+    ICON,
     OTHER,
 }

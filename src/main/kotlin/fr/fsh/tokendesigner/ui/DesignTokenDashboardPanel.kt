@@ -444,24 +444,14 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
     }
 
     /**
-     * Maps a fine-grained [TokenCategory] into one of three high-level buckets
-     * — Colors / Metrics / Effects — used as group headers in the family filter
-     * popup. Categories that don't fit (`OTHER`) fall under a generic "Other"
-     * group at the bottom.
+     * Maps a [TokenCategory] to a readable group header in the family filter popup.
      */
     private fun groupOf(category: fr.fsh.tokendesigner.model.TokenCategory): String =
-        when (category) {
-            fr.fsh.tokendesigner.model.TokenCategory.COLOR -> "Colors"
-            fr.fsh.tokendesigner.model.TokenCategory.SHADOW -> "Effects"
-            fr.fsh.tokendesigner.model.TokenCategory.SPACING,
-            fr.fsh.tokendesigner.model.TokenCategory.RADIUS,
-            fr.fsh.tokendesigner.model.TokenCategory.TYPOGRAPHY,
-            fr.fsh.tokendesigner.model.TokenCategory.DURATION,
-            fr.fsh.tokendesigner.model.TokenCategory.Z_INDEX -> "Metrics"
-            fr.fsh.tokendesigner.model.TokenCategory.OTHER -> "Other"
-        }
+        category.name.lowercase().replaceFirstChar { it.titlecase() }
 
-    private val groupOrder = listOf("Colors", "Metrics", "Effects", "Other")
+    private val groupOrder = fr.fsh.tokendesigner.model.TokenCategory.values().map { 
+        it.name.lowercase().replaceFirstChar { it.titlecase() }
+    }
 
     private fun showFamilyFilterPopup(invoker: javax.swing.JComponent) {
         val byGroup = LinkedHashMap<String, MutableMap<String, Int>>()

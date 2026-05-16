@@ -37,9 +37,12 @@ object PropertyContext {
             p == "z-index" -> TokenCategory.Z_INDEX
             p.contains("radius") -> TokenCategory.RADIUS
             p.contains("shadow") -> TokenCategory.SHADOW
+            p == "outline" || p == "filter" || p == "backdrop-filter" -> TokenCategory.EFFECTS
             p.startsWith("font") || p in TYPO_PROPS -> TokenCategory.TYPOGRAPHY
             p.contains("transition") || p.contains("animation") || p == "duration" || p.endsWith("-delay") -> TokenCategory.DURATION
             p in SPACING_PROPS || p.startsWith("padding") || p.startsWith("margin") || p.startsWith("inset") -> TokenCategory.SPACING
+            p in LAYOUT_PROPS || p.startsWith("grid") || p.startsWith("flex") -> TokenCategory.LAYOUT
+            p in SIZING_PROPS || p == "width" || p == "height" -> TokenCategory.SIZING
             else -> null
         }
     }
@@ -55,14 +58,17 @@ object PropertyContext {
     }
 
     private val COLOR_PROPS = setOf(
-        "background", "fill", "stroke", "outline",
-        "caret-color", "accent-color", "column-rule-color", "scrollbar-color",
+        "background", "fill", "stroke", "caret-color", "accent-color", "column-rule-color", "scrollbar-color",
     )
     private val SPACING_PROPS = setOf(
         "gap", "row-gap", "column-gap",
         "top", "left", "right", "bottom",
-        "width", "height",
-        "min-width", "min-height", "max-width", "max-height",
+    )
+    private val SIZING_PROPS = setOf(
+        "width", "height", "min-width", "min-height", "max-width", "max-height",
+    )
+    private val LAYOUT_PROPS = setOf(
+        "columns", "break-after", "break-before", "break-inside"
     )
     private val TYPO_PROPS = setOf(
         "line-height", "letter-spacing", "word-spacing", "text-indent",
