@@ -38,6 +38,7 @@ enum class Axis(val displayName: String) {
     USAGE_COVERAGE("Usage coverage"),
     DUPLICATION("Duplication"),
     HARDCODED_PRESSURE("Hardcoded pressure"),
+    REFERENCE_INTEGRITY("Reference integrity"),
 }
 
 /** A token whose declared name doesn't match the kind of value it carries. */

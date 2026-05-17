@@ -452,25 +452,38 @@ class DesignSystemAnalyzer(private val project: Project) {
         val literalsTotal = coverage.report.literalAssignments.coerceAtLeast(1)
         val hardcodedScore = (100 - (100.0 * hardcodedHits / literalsTotal)).coerceIn(0.0, 100.0).toInt()
 
+        // Broken references score: penalise relative to the total number of
+        // token references attempted. A broken ref is a real bug (typo, removed
+        // token, wrong path), so a small ratio drags the score down fast.
+        val brokenCount = coverage.brokenReferences.size
+        val refTotal = coverage.report.tokenisedAssignments.coerceAtLeast(1)
+        val referenceIntegrityScore = (100 - (100.0 * brokenCount / refTotal) * 4)
+            .coerceIn(0.0, 100.0).toInt()
+
         return listOf(
             SubScore(
-                Axis.SEMANTIC_COHERENCE, coherenceScore, weight = 30,
+                Axis.SEMANTIC_COHERENCE, coherenceScore, weight = 20,
                 caption = if (incoherences.isEmpty()) "All token names align with their values."
                 else "${incoherences.size} token(s) with mismatched name/value semantics.",
             ),
             SubScore(
-                Axis.USAGE_COVERAGE, coverageScore, weight = 30,
+                Axis.USAGE_COVERAGE, coverageScore, weight = 25,
                 caption = "${coverage.report.tokenisedAssignments} tokenised vs " +
                     "${coverage.report.literalAssignments} literal references.",
             ),
             SubScore(
-                Axis.DUPLICATION, duplicateScore, weight = 20,
+                Axis.DUPLICATION, duplicateScore, weight = 15,
                 caption = if (duplicates.isEmpty()) "No duplicate values detected."
                 else "${duplicates.size} cluster(s), $duplicateOffenders extra token(s).",
             ),
             SubScore(
                 Axis.HARDCODED_PRESSURE, hardcodedScore, weight = 20,
                 caption = "${hardcoded.size} repeated literal(s) worth tokenising.",
+            ),
+            SubScore(
+                Axis.REFERENCE_INTEGRITY, referenceIntegrityScore, weight = 20,
+                caption = if (brokenCount == 0) "All token references resolve cleanly."
+                else "$brokenCount broken token reference(s) detected.",
             ),
         )
     }

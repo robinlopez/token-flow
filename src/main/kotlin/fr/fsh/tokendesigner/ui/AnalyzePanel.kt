@@ -289,7 +289,7 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
         ), MAX_CONTENT_WIDTH))
         content.add(verticalSpacer(10))
         content.add(capWidth(CollapsibleSection(
-            title = "Non-existent tokens",
+            title = "Broken references",
             count = report.brokenReferences.size,
             helpText = BROKEN_REF_HELP,
             body = brokenReferencesBody(report.brokenReferences),
@@ -366,7 +366,8 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
      * trailing whitespace on the right.
      */
     private fun subScoresGrid(subs: List<SubScore>): JComponent {
-        val grid = JPanel(GridLayout(2, 2, JBUI.scale(10), JBUI.scale(10))).apply {
+        // `0` rows → GridLayout auto-rows to fit any number of cards in 2 cols.
+        val grid = JPanel(GridLayout(0, 2, JBUI.scale(10), JBUI.scale(10))).apply {
             isOpaque = false
         }
         for (sub in subs) grid.add(subScoreCard(sub))
@@ -396,12 +397,18 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
      * growing beyond a comfortable reading width on wide tool windows.
      */
     private fun capWidth(child: JComponent, maxPx: Int): JComponent {
-        val wrap = JPanel(BorderLayout()).apply {
+        // Override getMaximumSize so the wrapper never stretches vertically
+        // beyond the child's preferred height. Without this, BoxLayout-Y_AXIS
+        // distributes spare vertical space across collapsed sections — making
+        // the gap between consecutive collapsed headers balloon.
+        val wrap = object : JPanel(BorderLayout()) {
+            override fun getMaximumSize(): Dimension =
+                Dimension(JBUI.scale(maxPx), preferredSize.height)
+        }.apply {
             isOpaque = false
             alignmentX = Component.LEFT_ALIGNMENT
             add(child, BorderLayout.CENTER)
         }
-        wrap.maximumSize = Dimension(JBUI.scale(maxPx), Int.MAX_VALUE)
         return wrap
     }
 
