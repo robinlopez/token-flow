@@ -82,6 +82,12 @@ class DesignSystemAnalyzer(private val project: Project) {
             if (raw.isBlank() || isUnresolvedReference(raw) || isCssKeyword(raw)) continue
             val actual = valueFamily(raw) ?: continue
             if (expected.contains(actual)) continue
+            // The categorizer may have already reconciled a name/value clash
+            // (e.g. `--stroke-default: 1px` is assigned BORDER, not COLOR,
+            // because the value is a length). When the assigned category
+            // matches the actual value family, the user's intent is clear and
+            // the literal name reading is misleading — don't flag.
+            if (categoryMatchesValueFamily(token.category, actual)) continue
             out += Incoherence(
                 token = token,
                 expectedCategory = expected.first().tokenCategoryHint,
@@ -90,6 +96,28 @@ class DesignSystemAnalyzer(private val project: Project) {
             )
         }
         return out.sortedBy { it.token.name }
+    }
+
+    /**
+     * Does [category] (the categorizer's verdict, after its own
+     * name-vs-value disambiguation) line up with [valueFamily] (the shape of
+     * the resolved value)? Used to suppress incoherence false-positives where
+     * the categorizer already overrode the name hint.
+     */
+    private fun categoryMatchesValueFamily(category: TokenCategory, valueFamily: ValueFamily): Boolean = when (valueFamily) {
+        ValueFamily.COLOR -> category == TokenCategory.COLOR
+        ValueFamily.DURATION -> category == TokenCategory.DURATION
+        ValueFamily.SHADOW -> category == TokenCategory.SHADOW
+        ValueFamily.NUMBER -> category == TokenCategory.Z_INDEX || category == TokenCategory.OPACITY
+        ValueFamily.LENGTH -> category in setOf(
+            TokenCategory.SPACING,
+            TokenCategory.RADIUS,
+            TokenCategory.SIZING,
+            TokenCategory.TYPOGRAPHY,
+            TokenCategory.BORDER,
+            TokenCategory.LAYOUT,
+            TokenCategory.EFFECTS,
+        )
     }
 
     /**
