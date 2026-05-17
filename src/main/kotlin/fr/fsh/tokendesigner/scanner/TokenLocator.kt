@@ -217,9 +217,28 @@ object TokenLocator {
         // (`obj.method(…)`) where the bare identifier alone wouldn't resolve
         // to a token in the index.
         if (idStart > 0 && text[idStart - 1] == '.') return null
+        // Reject CSS functional notations (`var(--x)`, `calc(...)`, `rgb(...)`)
+        // that may appear inside backtick template literals. They look like
+        // helper calls but their argument is a CSS construct that the CSS /
+        // SCSS detectors downstream handle correctly.
+        val identName = text.subSequence(idStart, idEnd).toString()
+        if (identName in CSS_FUNCTIONS) return null
         val expression = text.subSequence(idStart, close + 1).toString()
         return Hit(expression, idStart, close + 1)
     }
+
+    private val CSS_FUNCTIONS = setOf(
+        "var", "calc", "min", "max", "clamp", "env",
+        "rgb", "rgba", "hsl", "hsla", "hwb", "lab", "lch", "oklab", "oklch", "color",
+        "url", "attr",
+        "linear-gradient", "radial-gradient", "conic-gradient",
+        "repeating-linear-gradient", "repeating-radial-gradient",
+        "translate", "translateX", "translateY", "translateZ", "translate3d",
+        "rotate", "rotateX", "rotateY", "rotateZ", "rotate3d",
+        "scale", "scaleX", "scaleY", "scaleZ", "scale3d",
+        "skew", "skewX", "skewY", "matrix", "matrix3d", "perspective",
+        "cubic-bezier", "steps",
+    )
 
     private fun findRuntimePropertyChain(text: CharSequence, offset: Int): Hit? {
         fun isChainChar(c: Char): Boolean =

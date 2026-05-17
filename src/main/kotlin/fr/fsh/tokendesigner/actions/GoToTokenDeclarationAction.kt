@@ -48,9 +48,10 @@ class GoToTokenDeclarationAction : AnAction() {
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = true
                 val tokens = runReadAction { TokenIndex.getInstance(project).get(file) }
-                val canonical = fr.fsh.tokendesigner.scanner.TokenNameParser
-                    .stripModeSegment(hit.name) ?: hit.name
-                val match = tokens.firstOrNull { it.name == hit.name || it.name == canonical }
+                val tokenNames = tokens.map { it.name }.toSet()
+                val resolved = fr.fsh.tokendesigner.scanner.TokenNameParser
+                    .resolveReference(hit.name, tokenNames)
+                val match = resolved?.let { r -> tokens.firstOrNull { it.name == r.tokenName } }
                 ApplicationManager.getApplication().invokeLater {
                     if (match == null) {
                         JBPopupFactory.getInstance()

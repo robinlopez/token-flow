@@ -81,24 +81,43 @@ class TokenCompletionContributor : CompletionContributor() {
             }
 
             if (context != null) {
-                val canonicalPrefix = if (context.kind == TokenKind.JS_OBJECT_PATH) {
-                    TokenNameParser.stripModeSegment(context.prefix) ?: context.prefix
-                } else context.prefix
-                val rawMode = if (context.kind == TokenKind.JS_OBJECT_PATH)
-                    TokenNameParser.rawModeSegmentOf(context.prefix) else null
-                val modeIdx = if (rawMode != null) TokenNameParser.modeSegmentIndex(context.prefix) else -1
+                // For JS_OBJECT_PATH, the typed prefix may carry both a binding
+                // name (`token.`) and a mode segment (`modeLight`). Indexed
+                // tokens have neither — strip both to match, then re-inject on
+                // insert so the user's literal stays well-formed.
+                val tokens = TokenIndex.getInstance(project).get(virtualFile)
+                val tokenNames = tokens.map { it.name }.toSet()
+                var canonicalPrefix: String
+                var bindingPrefix = ""
+                var rawMode: String? = null
+                var modeIdx = -1
+                if (context.kind == TokenKind.JS_OBJECT_PATH) {
+                    val noMode = TokenNameParser.stripModeSegment(context.prefix) ?: context.prefix
+                    rawMode = TokenNameParser.rawModeSegmentOf(context.prefix)
+                    if (noMode !in tokenNames && !tokens.any { it.name.startsWith(noMode) } && noMode.contains('.')) {
+                        bindingPrefix = noMode.substringBefore('.') + "."
+                        canonicalPrefix = noMode.substringAfter('.')
+                        val strippedCtx = context.prefix.removePrefix(bindingPrefix)
+                        modeIdx = TokenNameParser.modeSegmentIndex(strippedCtx)
+                    } else {
+                        canonicalPrefix = noMode
+                        modeIdx = TokenNameParser.modeSegmentIndex(context.prefix)
+                    }
+                } else {
+                    canonicalPrefix = context.prefix
+                }
 
                 val matcher = result.withPrefixMatcher(canonicalPrefix)
-                val tokens = TokenIndex.getInstance(project).get(virtualFile)
                 if (tokens.isNotEmpty()) {
                     val expectedCategory = inferCategoryFromProperty(lineText)
                     val nearbyFamilies = collectNearbyFamilies(document, offset)
                     for (token in tokens) {
                         if (token.kind != context.kind) continue
                         if (!token.name.startsWith(canonicalPrefix)) continue
-                        val insertText = if (rawMode != null && modeIdx >= 0) {
+                        val withMode = if (rawMode != null && modeIdx >= 0) {
                             TokenNameParser.injectModeSegment(token.name, rawMode, modeIdx)
                         } else token.name
+                        val insertText = "$bindingPrefix$withMode"
                         matcher.addElement(buildLookup(token, insertText, expectedCategory, nearbyFamilies))
                     }
                 }

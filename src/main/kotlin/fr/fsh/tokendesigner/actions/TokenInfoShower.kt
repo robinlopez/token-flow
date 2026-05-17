@@ -48,9 +48,10 @@ object TokenInfoShower {
                 val file = com.intellij.openapi.fileEditor.FileDocumentManager
                     .getInstance().getFile(editor.document)
                 val tokens = runReadAction { TokenIndex.getInstance(project).get(file) }
-                val canonical = fr.fsh.tokendesigner.scanner.TokenNameParser
-                    .stripModeSegment(hit.name) ?: hit.name
-                val token = tokens.firstOrNull { it.name == hit.name || it.name == canonical } ?: return
+                val tokenNames = tokens.map { it.name }.toSet()
+                val resolved = fr.fsh.tokendesigner.scanner.TokenNameParser
+                    .resolveReference(hit.name, tokenNames) ?: return
+                val token = tokens.firstOrNull { it.name == resolved.tokenName } ?: return
                 ApplicationManager.getApplication().invokeLater {
                     if (editor.isDisposed) return@invokeLater
                     showPopup(project, editor, token, anchorScreenLocation)
