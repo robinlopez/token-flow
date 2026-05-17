@@ -7,12 +7,20 @@ Format : [Keep a Changelog](https://keepachangelog.com/) — versionning [SemVer
 ### Added
 - **Scope display in Hardcoded Values** : Active scope is now visible in the Hardcoded Values panel.
 - **CSS Named Colors detection** : Scanner now identifies named colors as hardcoded values.
+- **Broken Reference Detection** : "Non-existent tokens" are now flagged in the Analyser and Hardcoded Values panel.
+- **Smart Suggestions with Fallbacks** : Suggestion engine now uses variable fallbacks (e.g. `#fff` in `var(--color, #fff)`) and respects CSS property categories.
+- **Ignored Variables Config** : Added UI to ignore external/library files from analysis to reduce false positives.
 
 ### Fixed
 - **Comments ignored in scanner** : Values inside code comments are no longer detected.
+- **Circular Token Definitions** : Literals used within a token's own declaration are no longer flagged as hardcoded values.
+- **Dynamic List Expansion** : Long lists in the Analyser report now have a clickable `+x more` link.
 
 ### Changed
 - **UI Harmonization** : Scope info is now right-aligned in toolbars for better space optimization.
+- **Warning UI Visibility** : Broken references feature a high-visibility yellow warning icon in the Hardcoded Values panel.
+- **SCSS Broken References** : Excluded SCSS variables from missing token analysis (delegated to compiler).
+
 
 ## [0.1.4] — 2026-05-15
 
