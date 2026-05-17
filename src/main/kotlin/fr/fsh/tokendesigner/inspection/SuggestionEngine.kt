@@ -41,8 +41,13 @@ object SuggestionEngine {
         allTokens: List<DesignToken>,
         expectedCategory: TokenCategory?,
     ): List<TokenSuggestion> {
-        val literalCategory = hit.kind.toCategory()
-        val exact = valueIndex.lookup(hit.text, literalCategory)
+        // Prefer the CSS-property-derived category over the literal's natural
+        // one when known: `padding: 6px` looks up under SPACING, `font-size:
+        // 12px` under TYPOGRAPHY, etc. Falling back to the literal's category
+        // keeps the lookup working in JS object literals where the property
+        // context is ambiguous.
+        val lookupCategory = expectedCategory ?: hit.kind.toCategory()
+        val exact = valueIndex.lookup(hit.text, lookupCategory)
         // Helper-aware exact matches: a hardcoded `12` or `12px` can be
         // produced by a `spacing(value)` helper whose unit is `8` (call it
         // with `1.5`). Compose them with the direct exact matches so the
