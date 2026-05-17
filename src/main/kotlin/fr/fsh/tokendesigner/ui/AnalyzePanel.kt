@@ -27,6 +27,7 @@ import fr.fsh.tokendesigner.analyze.HardcodedOccurrence
 import fr.fsh.tokendesigner.analyze.Incoherence
 import fr.fsh.tokendesigner.analyze.SubScore
 import fr.fsh.tokendesigner.analyze.TokenSourceUsage
+import fr.fsh.tokendesigner.model.DesignToken
 import fr.fsh.tokendesigner.scanner.TokenIndex
 import fr.fsh.tokendesigner.settings.Scope
 import fr.fsh.tokendesigner.settings.ScopeResolver
@@ -288,6 +289,14 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
         ), MAX_CONTENT_WIDTH))
         content.add(verticalSpacer(10))
         content.add(capWidth(CollapsibleSection(
+            title = "Broken references",
+            count = report.brokenReferences.size,
+            helpText = BROKEN_REF_HELP,
+            body = brokenReferencesBody(report.brokenReferences),
+        ), MAX_CONTENT_WIDTH))
+        content.add(verticalSpacer(10))
+
+        content.add(capWidth(CollapsibleSection(
             title = "Unused tokens",
             count = report.unusedTokens.size,
             helpText = UNUSED_HELP,
@@ -357,7 +366,8 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
      * trailing whitespace on the right.
      */
     private fun subScoresGrid(subs: List<SubScore>): JComponent {
-        val grid = JPanel(GridLayout(2, 2, JBUI.scale(10), JBUI.scale(10))).apply {
+        // `0` rows → GridLayout auto-rows to fit any number of cards in 2 cols.
+        val grid = JPanel(GridLayout(0, 2, JBUI.scale(10), JBUI.scale(10))).apply {
             isOpaque = false
         }
         for (sub in subs) grid.add(subScoreCard(sub))
@@ -387,12 +397,18 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
      * growing beyond a comfortable reading width on wide tool windows.
      */
     private fun capWidth(child: JComponent, maxPx: Int): JComponent {
-        val wrap = JPanel(BorderLayout()).apply {
+        // Override getMaximumSize so the wrapper never stretches vertically
+        // beyond the child's preferred height. Without this, BoxLayout-Y_AXIS
+        // distributes spare vertical space across collapsed sections — making
+        // the gap between consecutive collapsed headers balloon.
+        val wrap = object : JPanel(BorderLayout()) {
+            override fun getMaximumSize(): Dimension =
+                Dimension(JBUI.scale(maxPx), preferredSize.height)
+        }.apply {
             isOpaque = false
             alignmentX = Component.LEFT_ALIGNMENT
             add(child, BorderLayout.CENTER)
         }
-        wrap.maximumSize = Dimension(JBUI.scale(maxPx), Int.MAX_VALUE)
         return wrap
     }
 
@@ -401,10 +417,24 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
     private fun incoherenceBody(rows: List<Incoherence>): JComponent {
         if (rows.isEmpty()) return emptyState("No semantic incoherence detected.")
         val panel = verticalList()
-        for (row in rows.take(50)) panel.add(incoherenceRow(row))
-        if (rows.size > 50) panel.add(moreLabel(rows.size - 50))
+        renderTruncatedList(panel, rows, limit = 50) { incoherenceRow(it) }
         return panel
     }
+
+
+    private fun brokenReferencesBody(rows: List<fr.fsh.tokendesigner.analyze.BrokenReference>): JComponent {
+        if (rows.isEmpty()) return emptyState("No broken token references detected.")
+        val panel = verticalList()
+        renderTruncatedList(panel, rows, limit = 50) { row ->
+            val basename = row.filePath.substringAfterLast('/')
+            val text = "<html><code style='color:#db5858'>${escape(row.name)}</code> &nbsp; — &nbsp; " +
+                "<b>$basename</b>:${row.line}</html>"
+            rowPanel(text, locate = { navigateTo(row.filePath, row.offset) })
+        }
+        return panel
+    }
+
+
 
     private fun incoherenceRow(row: Incoherence): JComponent {
         val text = "<html><b>${escape(row.token.name)}</b><br/>" +
@@ -412,13 +442,26 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
         return rowPanel(text, locate = { navigateTo(row.token.filePath, row.token.offset) })
     }
 
+    private fun unusedBody(tokens: List<DesignToken>): JComponent {
+        if (tokens.isEmpty()) return emptyState("No unused tokens found.")
+        val panel = verticalList()
+        renderTruncatedList(panel, tokens, limit = 50) { unusedRow(it) }
+        return panel
+    }
+
+    private fun unusedRow(token: DesignToken): JComponent {
+        val text = "<html><b>${escape(token.name)}</b> &nbsp; " +
+            "<span style='color:#888'>= ${escape(token.resolvedValue)}</span></html>"
+        return rowPanel(text, locate = { navigateTo(token.filePath, token.offset) })
+    }
+
     private fun duplicateBody(clusters: List<DuplicateCluster>): JComponent {
         if (clusters.isEmpty()) return emptyState("No duplicate tokens detected.")
         val panel = verticalList()
-        for (cluster in clusters.take(30)) panel.add(duplicateRow(cluster))
-        if (clusters.size > 30) panel.add(moreLabel(clusters.size - 30))
+        renderTruncatedList(panel, clusters, limit = 30) { duplicateRow(it) }
         return panel
     }
+
 
     private fun duplicateRow(cluster: DuplicateCluster): JComponent {
         val tokenLinks = cluster.tokens.joinToString(", ") { escape(it.name) }
@@ -433,10 +476,10 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
     private fun hardcodedBody(clusters: List<HardcodedCluster>): JComponent {
         if (clusters.isEmpty()) return emptyState("No notable hardcoded value found.")
         val panel = verticalList()
-        for (cluster in clusters.take(30)) panel.add(hardcodedRow(cluster))
-        if (clusters.size > 30) panel.add(moreLabel(clusters.size - 30))
+        renderTruncatedList(panel, clusters, limit = 30) { hardcodedRow(it) }
         return panel
     }
+
 
     /**
      * Each cluster row is itself collapsible: the header shows the literal +
@@ -587,18 +630,7 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
         }
     }
 
-    /** Tokens declared but never referenced. Each row links to the declaration. */
-    private fun unusedBody(unused: List<fr.fsh.tokendesigner.model.DesignToken>): JComponent {
-        if (unused.isEmpty()) return emptyState("Every token is referenced at least once.")
-        val panel = verticalList()
-        for (token in unused.take(80)) {
-            val text = "<html><b>${escape(token.name)}</b> &nbsp; " +
-                "<span style='color:#888'>= ${escape(token.resolvedValue)}</span></html>"
-            panel.add(rowPanel(text, locate = { navigateTo(token.filePath, token.offset) }))
-        }
-        if (unused.size > 80) panel.add(moreLabel(unused.size - 80))
-        return panel
-    }
+
 
     // ─── Helpers ─────────────────────────────────────────────────────────
 
@@ -648,13 +680,36 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
         border = JBUI.Borders.empty(8, 4)
     }
 
+    private fun <T> renderTruncatedList(panel: JPanel, items: List<T>, limit: Int, renderer: (T) -> JComponent) {
+        for (item in items.take(limit)) {
+            panel.add(renderer(item))
+        }
+        if (items.size > limit) {
+            val remaining = items.drop(limit)
+            val more = moreLabel(remaining.size)
+            more.addMouseListener(object : java.awt.event.MouseAdapter() {
+                override fun mouseClicked(e: java.awt.event.MouseEvent) {
+                    panel.remove(more)
+                    for (item in remaining) {
+                        panel.add(renderer(item))
+                    }
+                    panel.revalidate()
+                    panel.repaint()
+                }
+            })
+            panel.add(more)
+        }
+    }
+
     private fun moreLabel(extra: Int): JComponent =
-        JBLabel("<html><i>+ $extra more…</i></html>").apply {
+        JBLabel("<html><a href=''>+ $extra more…</a></html>").apply {
             foreground = JBColor.GRAY
             font = JBFont.small()
             alignmentX = Component.LEFT_ALIGNMENT
             border = JBUI.Borders.empty(4)
+            cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
         }
+
 
     private fun verticalSpacer(px: Int): Component = Box.createVerticalStrut(JBUI.scale(px))
 
@@ -689,5 +744,8 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
             "Tokens declared but never referenced anywhere in the project " +
                 "(no `var(--…)`, `\$…` or `'{path}'` match found). Click a row " +
                 "to open the declaration."
+        const val BROKEN_REF_HELP =
+            "References to tokens that do not exist in your design system. " +
+                "This usually means a typo or a deleted token that is still being used."
     }
 }

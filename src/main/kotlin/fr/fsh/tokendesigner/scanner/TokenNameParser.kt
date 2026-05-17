@@ -108,6 +108,75 @@ object TokenNameParser {
         return segs.joinToString(".")
     }
 
+    /**
+     * Resolves a reference name to a token that exists in [tokenNames], tolerating
+     * three common notation drifts:
+     *  1. A leading export-binding segment (`token.…`) that the indexer strips.
+     *  2. A mode segment (`modeLight` / `modeDark`) that the indexer strips.
+     *  3. Adjacent path segments that are split with a dot in source but live as
+     *     a single camelCase segment in the token tree
+     *     (e.g. `…default.high.surface.default` vs `…defaultHigh.surface.default`),
+     *     and the inverse (camelCase in source, split in the tree).
+     *
+     * Returns the matched token name along with the binding prefix that had to
+     * be stripped (`"token."` or `""`), so callers can re-inject it when
+     * rebuilding a replacement string.
+     */
+    fun resolveReference(name: String, tokenNames: Set<String>): ResolvedReference? {
+        tryMatch(name, "", tokenNames)?.let { return it }
+        val canonical = stripModeSegment(name) ?: name
+        if (canonical != name) tryMatch(canonical, "", tokenNames)?.let { return it }
+        if (!name.contains('.')) return null
+
+        val bindingPrefix = name.substringBefore('.') + "."
+        val stripped = name.substringAfter('.')
+        tryMatch(stripped, bindingPrefix, tokenNames)?.let { return it }
+        val strippedCanonical = stripModeSegment(stripped) ?: stripped
+        if (strippedCanonical != stripped) {
+            tryMatch(strippedCanonical, bindingPrefix, tokenNames)?.let { return it }
+        }
+        return null
+    }
+
+    /**
+     * Exact match first, then a single merge of an adjacent segment pair
+     * (`a.b` → `aB`), then a single split of a camelCase segment (`aB` → `a.b`).
+     * One transformation is enough for the camelCase / dot drifts seen in
+     * practice; deeper combinations would blow up exponentially without buying
+     * real-world coverage.
+     */
+    private fun tryMatch(candidate: String, prefix: String, tokenNames: Set<String>): ResolvedReference? {
+        if (candidate in tokenNames) return ResolvedReference(candidate, prefix)
+        val segs = candidate.split('.')
+        if (segs.size >= 2) {
+            for (i in 0 until segs.size - 1) {
+                val merged = segs.toMutableList()
+                merged[i] = merged[i] + merged[i + 1].replaceFirstChar(Char::uppercase)
+                merged.removeAt(i + 1)
+                val candidateMerged = merged.joinToString(".")
+                if (candidateMerged in tokenNames) return ResolvedReference(candidateMerged, prefix)
+            }
+        }
+        for (i in segs.indices) {
+            val split = splitCamelCaseOnce(segs[i]) ?: continue
+            val expanded = segs.toMutableList()
+            expanded[i] = split.first
+            expanded.add(i + 1, split.second)
+            val candidateExpanded = expanded.joinToString(".")
+            if (candidateExpanded in tokenNames) return ResolvedReference(candidateExpanded, prefix)
+        }
+        return null
+    }
+
+    /** `defaultHigh` → `("default", "high")`, `default` → null. */
+    private fun splitCamelCaseOnce(segment: String): Pair<String, String>? {
+        val idx = segment.indexOfFirst { it.isUpperCase() }
+        if (idx <= 0) return null
+        return segment.substring(0, idx) to segment.substring(idx).replaceFirstChar(Char::lowercase)
+    }
+
+    data class ResolvedReference(val tokenName: String, val bindingPrefix: String)
+
     /** Number of leading segments (excluding the state) that two tokens share. */
     fun commonStructuralPrefix(a: TokenStructure, b: TokenStructure): Int {
         // Compare everything except the trailing state segment to avoid favoring

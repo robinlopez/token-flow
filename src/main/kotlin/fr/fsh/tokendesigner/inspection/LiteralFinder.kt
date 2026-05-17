@@ -15,16 +15,14 @@ object LiteralFinder {
         LENGTH,
         DURATION,
         /**
-         * Plain numeric literal in property-value position (`fontSize: 34`,
-         * `radius: 8`, `opacity: 0.5`). Common in React-Native / CSS-in-JS
-         * stylesheets where sizes are unitless. NOT emitted for numbers that
-         * sit inside a function-call's argument list — those are intentional
-         * scale calls (`spacing(0.5)`) and would be misleading to flag.
-         *
-         * Callers in non-JS files should filter these out: CSS shorthand like
-         * `border: 1 solid red` would produce a spurious hit otherwise.
+         * Plain numeric literal in property-value position.
          */
         NUMBER,
+        /**
+         * A reference to a token: `var(--name)`, `$name`, `'{path}'`,
+         * `dt('path')`.
+         */
+        REFERENCE,
     }
 
     /**
@@ -61,38 +59,55 @@ object LiteralFinder {
          * "hardcoded values" scan.
          */
         val isDeclaration: Boolean = false,
+        /**
+         * The name of the variable being declared, if [isDeclaration] is true.
+         */
+        val declarationName: String? = null,
     )
 
     fun findIn(text: CharSequence): List<Hit> {
         val out = mutableListOf<Hit>()
-        // Compute fallback ranges first; any literal living inside them is part
-        // of a `var(--name, fallback)` safety net and must NOT be flagged.
+        // Compute fallback and comment ranges first; any literal inside them must NOT be flagged.
         val fallbackRanges = computeFallbackRanges(text)
+        val commentRanges = computeCommentRanges(text)
+
+        fun isIgnored(offset: Int): Boolean =
+            isInsideFallback(offset, fallbackRanges) || commentRanges.any { offset in it }
 
         for (m in HEX_REGEX.findAll(text)) {
             if (isInsideTokenName(text, m.range.first)) continue
-            if (isInsideFallback(m.range.first, fallbackRanges)) continue
+            if (isIgnored(m.range.first)) continue
             val hit = expandWrapper(text, m.value, m.range.first, m.range.last + 1, Kind.COLOR)
-            out += hit.copy(isDeclaration = isVariableDeclaration(text, m.range.first))
+            val declName = variableDeclarationName(text, m.range.first)
+            out += hit.copy(isDeclaration = declName != null, declarationName = declName)
         }
         for (m in FN_COLOR_REGEX.findAll(text)) {
-            if (isInsideFallback(m.range.first, fallbackRanges)) continue
+            if (isIgnored(m.range.first)) continue
             val hit = expandWrapper(text, m.value, m.range.first, m.range.last + 1, Kind.COLOR)
-            out += hit.copy(isDeclaration = isVariableDeclaration(text, m.range.first))
+            val declName = variableDeclarationName(text, m.range.first)
+            out += hit.copy(isDeclaration = declName != null, declarationName = declName)
+        }
+        for (m in NAMED_COLOR_REGEX.findAll(text)) {
+            if (isIgnored(m.range.first)) continue
+            val hit = expandWrapper(text, m.value, m.range.first, m.range.last + 1, Kind.COLOR)
+            val declName = variableDeclarationName(text, m.range.first)
+            out += hit.copy(isDeclaration = declName != null, declarationName = declName)
         }
         for (m in DURATION_REGEX.findAll(text)) {
             if (isWhitelisted(m.value)) continue
-            if (isInsideFallback(m.range.first, fallbackRanges)) continue
+            if (isIgnored(m.range.first)) continue
             val hit = expandWrapper(text, m.value, m.range.first, m.range.last + 1, Kind.DURATION)
-            out += hit.copy(isDeclaration = isVariableDeclaration(text, m.range.first))
+            val declName = variableDeclarationName(text, m.range.first)
+            out += hit.copy(isDeclaration = declName != null, declarationName = declName)
         }
         for (m in LENGTH_REGEX.findAll(text)) {
             if (isWhitelisted(m.value)) continue
-            if (isInsideFallback(m.range.first, fallbackRanges)) continue
+            if (isIgnored(m.range.first)) continue
             // Avoid double-matching the duration `12s` as length when both regex agree.
             if (out.any { it.startOffset == m.range.first }) continue
             val hit = expandWrapper(text, m.value, m.range.first, m.range.last + 1, Kind.LENGTH)
-            out += hit.copy(isDeclaration = isVariableDeclaration(text, m.range.first))
+            val declName = variableDeclarationName(text, m.range.first)
+            out += hit.copy(isDeclaration = declName != null, declarationName = declName)
         }
         // Plain numbers in property-value position. The regex captures the
         // surrounding `IDENT:` for anchoring; group 1 is the number itself.
@@ -104,12 +119,30 @@ object LiteralFinder {
             val end = numberGroup.range.last + 1
             val value = numberGroup.value
             if (isWhitelisted(value)) continue
-            if (isInsideFallback(start, fallbackRanges)) continue
+            if (isIgnored(start)) continue
             if (out.any { it.startOffset == start }) continue
             // If the key starts with $ or is --, it's a variable declaration.
             val key = m.value.substringBefore(':').trim()
-            val isDecl = key.startsWith("$") || key.startsWith("--")
-            out += Hit(value, start, end, Kind.NUMBER, isDeclaration = isDecl)
+            val declName = if (key.startsWith("$") || key.startsWith("--")) key else null
+            out += Hit(value, start, end, Kind.NUMBER, isDeclaration = declName != null, declarationName = declName)
+        }
+
+        // Token references: var(--name), $name, {path}, dt('path')
+        for (m in CSS_REF.findAll(text)) {
+            if (isIgnored(m.range.first)) continue
+            out += Hit(m.value, m.range.first, m.range.last + 1, Kind.REFERENCE)
+        }
+        for (m in SCSS_REF.findAll(text)) {
+            if (isIgnored(m.range.first)) continue
+            out += Hit(m.value, m.range.first, m.range.last + 1, Kind.REFERENCE)
+        }
+        for (m in JS_PATH_REF.findAll(text)) {
+            if (isIgnored(m.range.first)) continue
+            out += Hit(m.value, m.range.first, m.range.last + 1, Kind.REFERENCE)
+        }
+        for (m in DT_REF.findAll(text)) {
+            if (isIgnored(m.range.first)) continue
+            out += Hit(m.value, m.range.first, m.range.last + 1, Kind.REFERENCE)
         }
         return out
     }
@@ -272,6 +305,18 @@ object LiteralFinder {
         ranges.any { offset in it }
 
     /**
+     * Returns ranges of both block (`/* ... */`) and line (`// ...`) comments.
+     */
+    private fun computeCommentRanges(text: CharSequence): List<IntRange> {
+        val ranges = mutableListOf<IntRange>()
+        val blockRegex = Regex("/\\*.*?\\*/", RegexOption.DOT_MATCHES_ALL)
+        for (m in blockRegex.findAll(text)) ranges += m.range
+        val lineRegex = Regex("//.*")
+        for (m in lineRegex.findAll(text)) ranges += m.range
+        return ranges
+    }
+
+    /**
      * Hex colors should not be inspected when they appear inside a token name
      * (e.g. `--color-#fff` would be unusual but defensive). For now the regex
      * already requires word-boundary; this is here as a safety net.
@@ -284,33 +329,31 @@ object LiteralFinder {
 
     /**
      * Checks if the literal at [offset] is part of a variable declaration
-     * like `$name: ...` or `--name: ...`.
+     * like `$name: ...` or `--name: ...`, and returns the variable name.
      */
-    private fun isVariableDeclaration(text: CharSequence, offset: Int): Boolean {
+    private fun variableDeclarationName(text: CharSequence, offset: Int): String? {
         var i = offset - 1
         while (i >= 0 && text[i].isWhitespace()) i--
-        if (i < 0 || text[i] != ':') return false
+        if (i < 0 || text[i] != ':') return null
 
         i--
         while (i >= 0 && text[i].isWhitespace()) i--
-        if (i < 0) return false
+        if (i < 0) return null
 
         // Match variable name backwards
         var j = i
         while (j >= 0 && (text[j].isLetterOrDigit() || text[j] == '-' || text[j] == '_')) j--
+        if (j == i) return null
 
-        if (j < 0) {
-            // Check if we hit the start of the file exactly at the name start
-            return false
-        }
+        val name = text.subSequence(j + 1, i + 1).toString()
 
         // SCSS: $name
-        if (text[j] == '$') return true
+        if (j >= 0 && text[j] == '$') return "$$name"
 
         // CSS: --name
-        if (text[j] == '-' && j > 0 && text[j - 1] == '-') return true
+        if (j > 0 && text[j] == '-' && text[j - 1] == '-') return "--$name"
 
-        return false
+        return null
     }
 
     private fun isWhitelisted(value: String): Boolean {
@@ -325,6 +368,11 @@ object LiteralFinder {
     // Functional color forms; we keep the parentheses inside the match for replacement.
     private val FN_COLOR_REGEX = Regex(
         "(?<![a-zA-Z0-9_-])(?:rgb|rgba|hsl|hsla|hwb)\\(\\s*[^)]*\\)",
+        RegexOption.IGNORE_CASE,
+    )
+    // Named colors
+    private val NAMED_COLOR_REGEX = Regex(
+        "(?<![a-zA-Z0-9_-])(?:transparent|black|white|red|green|blue|yellow|orange|purple|gray|grey|pink|brown)\\b(?!-)",
         RegexOption.IGNORE_CASE,
     )
     private val DURATION_REGEX = Regex("(?<![a-zA-Z0-9_-])-?\\d*\\.?\\d+(?:ms|s)\\b")
@@ -354,4 +402,9 @@ object LiteralFinder {
     private val WHITELIST = setOf(
         "0", "0px", "0rem", "0em", "0%", "100%", "0s", "0ms",
     )
+
+    private val CSS_REF = Regex("var\\(\\s*--([A-Za-z_][A-Za-z0-9_-]*)(?:\\s*,.*)?\\)")
+    private val SCSS_REF = Regex("(?<![A-Za-z0-9_-])\\$([A-Za-z_][A-Za-z0-9_-]*)")
+    private val JS_PATH_REF = Regex("(['\"`])\\{([A-Za-z_][A-Za-z0-9_.-]*)\\}\\1")
+    private val DT_REF = Regex("dt\\(\\s*(['\"`])([A-Za-z_][A-Za-z0-9_.-]*)\\1\\s*\\)")
 }

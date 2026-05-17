@@ -1,7 +1,7 @@
 package fr.fsh.tokendesigner.actions
 
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.application.runReadAction
+import fr.fsh.tokendesigner.util.readAction
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.progress.ProgressIndicator
@@ -44,7 +44,7 @@ object TokenAlternativesShower {
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = true
                 val file = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance().getFile(editor.document)
-                val tokens = runReadAction { TokenIndex.getInstance(project).get(file) }
+                val tokens = readAction { TokenIndex.getInstance(project).get(file) }
                 ApplicationManager.getApplication().invokeLater {
                     if (editor.isDisposed) return@invokeLater
                     showPopup(project, editor, hit, tokens, anchorScreenLocation)
@@ -76,12 +76,13 @@ object TokenAlternativesShower {
                 return
             }
         }
-        // Pivot lookup must tolerate JS preset paths whose mode segment was
-        // stripped at indexing time — `'{token.modeLight.x.y}'` and
-        // `'{token.modeDark.x.y}'` both resolve to canonical `token.x.y`.
-        val canonicalName = fr.fsh.tokendesigner.scanner.TokenNameParser
-            .stripModeSegment(hit.name) ?: hit.name
-        val pivot = all.firstOrNull { it.name == hit.name || it.name == canonicalName }
+        // Pivot lookup must tolerate JS preset paths whose mode segment and/or
+        // export binding name were stripped at indexing time. `'{token.modeLight.x.y}'`
+        // resolves to canonical `x.y` (binding `token.` + mode `modeLight` both stripped).
+        val tokenNames = all.map { it.name }.toSet()
+        val resolved = fr.fsh.tokendesigner.scanner.TokenNameParser.resolveReference(hit.name, tokenNames)
+        val pivot = resolved?.let { r -> all.firstOrNull { it.name == r.tokenName } }
+        val bindingPrefix = resolved?.bindingPrefix ?: ""
         val category = pivot?.category
         val candidates = if (category != null) {
             all.filter { it.category == category }
@@ -114,7 +115,7 @@ object TokenAlternativesShower {
             .setRequestFocus(true)
             .setNamerForFiltering { it.filterKey }
             .setItemChosenCallback { selected ->
-                if (selected is TokenPopupRow) replaceToken(project, editor, hit, selected.token)
+                if (selected is TokenPopupRow) replaceToken(project, editor, hit, selected.token, bindingPrefix)
             }
             .setSelectedValue(pivotRow, true)
             .setMinSize(JBUI.size(580, 380))
@@ -210,22 +211,33 @@ object TokenAlternativesShower {
     private fun formatScalarValue(d: Double): String =
         if (d == d.toLong().toDouble()) d.toLong().toString() else d.toString()
 
-    private fun replaceToken(project: Project, editor: Editor, hit: TokenLocator.Hit, replacement: DesignToken) {
+    private fun replaceToken(
+        project: Project,
+        editor: Editor,
+        hit: TokenLocator.Hit,
+        replacement: DesignToken,
+        bindingPrefix: String = "",
+    ) {
         if (replacement.name == hit.name) return
         // The Hit range matches the full reference syntax (incl. `'{…}'` for JS
         // paths), so wrap the replacement in the form expected by the kind.
-        // For JS tokens whose canonical name had its mode segment stripped at
-        // indexing time, re-inject the mode segment from the original hit so
-        // `{token.modeLight.…}` stays under the same mode after substitution.
+        // For JS tokens, the canonical name has had its mode segment AND a
+        // possible binding-name prefix (`token.`) stripped at indexing time —
+        // re-inject both from the original hit so the substitution stays
+        // self-consistent.
         val replaceText = when (replacement.kind) {
             TokenKind.JS_OBJECT_PATH -> {
-                val raw = fr.fsh.tokendesigner.scanner.TokenNameParser.rawModeSegmentOf(hit.name)
-                val idx = fr.fsh.tokendesigner.scanner.TokenNameParser.modeSegmentIndex(hit.name)
-                val finalPath = if (raw != null && idx >= 0) {
+                // Compute mode index against the *stripped* hit so it aligns
+                // with the canonical replacement name (which has no binding).
+                val strippedHit = if (bindingPrefix.isNotEmpty())
+                    hit.name.removePrefix(bindingPrefix) else hit.name
+                val raw = fr.fsh.tokendesigner.scanner.TokenNameParser.rawModeSegmentOf(strippedHit)
+                val idx = fr.fsh.tokendesigner.scanner.TokenNameParser.modeSegmentIndex(strippedHit)
+                val withMode = if (raw != null && idx >= 0) {
                     fr.fsh.tokendesigner.scanner.TokenNameParser
                         .injectModeSegment(replacement.name, raw, idx)
                 } else replacement.name
-                "'{$finalPath}'"
+                "'{$bindingPrefix$withMode}'"
             }
             else -> replacement.name
         }
@@ -248,9 +260,9 @@ object TokenAlternativesShower {
                 indicator.isIndeterminate = true
                 val file = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance().getFile(editor.document)
                 val ext = file?.extension?.lowercase()
-                val allTokens = runReadAction { TokenIndex.getInstance(project).get(file) }
+                val allTokens = readAction { TokenIndex.getInstance(project).get(file) }
                 val tokens = allTokens.filter { it.kind in compatibleKinds(ext) }
-                val text = runReadAction { editor.document.text }
+                val text = readAction { editor.document.text }
                 val expected = PropertyContext.detectAt(text, hit.startOffset)
                 val valueIndex = TokenValueIndex(tokens)
                 val suggestions = if (isJsExt(ext) && hit.insidePartialString) emptyList()
@@ -369,7 +381,7 @@ object TokenAlternativesShower {
                 indicator.isIndeterminate = true
                 val file = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance().getFile(editor.document)
                 val ext = file?.extension?.lowercase()
-                val allTokens = runReadAction { TokenIndex.getInstance(project).get(file) }
+                val allTokens = readAction { TokenIndex.getInstance(project).get(file) }
                 val tokens = allTokens.filter { it.kind in compatibleKinds(ext) }
                 val expected = PropertyContext.categoryFor(propertyName)
 

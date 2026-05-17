@@ -17,25 +17,60 @@ import fr.fsh.tokendesigner.ui.ColorParser
  */
 class TokenValueIndex(tokens: Collection<DesignToken>) {
 
-    private val byNormalized: Map<String, List<DesignToken>>
+    /**
+     * Per-category lookup. Indexing by category prevents semantic leakage
+     * across kinds — a SHADOW blur token whose value happens to be `6px`
+     * must NOT surface as a suggestion for `padding: 6px`. Cross-category
+     * fallback within length-bearing categories is opt-in via [LENGTH_FAMILY].
+     */
+    private val byCategory: Map<TokenCategory, Map<String, List<DesignToken>>>
 
     init {
-        val grouped = LinkedHashMap<String, MutableList<DesignToken>>()
+        val grouped = HashMap<TokenCategory, HashMap<String, MutableList<DesignToken>>>()
         for (token in tokens) {
             val key = normalize(token.resolvedValue, token.category) ?: continue
-            grouped.getOrPut(key) { mutableListOf() } += token
+            grouped
+                .getOrPut(token.category) { HashMap() }
+                .getOrPut(key) { mutableListOf() } += token
         }
-        byNormalized = grouped
+        byCategory = grouped
     }
 
+    /**
+     * Returns tokens that resolve to [literal] **within [category]**. When
+     * [category] belongs to [LENGTH_FAMILY] the lookup widens to every other
+     * length-bearing category, so a `12px` literal under a `border-radius`
+     * context can still match a SPACING token with the same value — but the
+     * result will never leak into SHADOW, EFFECTS, DURATION, OPACITY or
+     * COLOR, which is the source of the spurious suggestions we used to ship.
+     */
     fun lookup(literal: String, category: TokenCategory): List<DesignToken> {
         val key = normalize(literal, category) ?: return emptyList()
-        return byNormalized[key] ?: emptyList()
+        val categories = if (category in LENGTH_FAMILY) LENGTH_FAMILY else listOf(category)
+        val out = mutableListOf<DesignToken>()
+        for (c in categories) {
+            byCategory[c]?.get(key)?.let { out += it }
+        }
+        return out
     }
 
     companion object {
         private const val ROOT_FONT_SIZE_PX = 16.0
         private val LENGTH_REGEX = Regex("^(-?\\d*\\.?\\d+)(px|rem|em)$")
+
+        /**
+         * Categories whose values are conventionally lengths (px/rem/em). A
+         * spacing token at 12px is a defensible fallback for a typography or
+         * radius context, and vice versa — but SHADOW / EFFECTS / DURATION /
+         * OPACITY / Z_INDEX / COLOR sit outside this family.
+         */
+        private val LENGTH_FAMILY = listOf(
+            TokenCategory.SPACING,
+            TokenCategory.RADIUS,
+            TokenCategory.SIZING,
+            TokenCategory.TYPOGRAPHY,
+            TokenCategory.BORDER,
+        )
 
         fun normalize(value: String, category: TokenCategory): String? {
             val v = value.trim().lowercase()

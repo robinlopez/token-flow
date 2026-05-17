@@ -28,6 +28,10 @@ class RoundSwatch(diameterPx: Int = 16) : JPanel() {
     var glyph: String? = null
         set(value) { field = value; repaint() }
 
+    var glyphColor: Color? = null
+        set(value) { field = value; repaint() }
+
+
     init {
         val d = JBUI.scale(diameterPx)
         val size = Dimension(d, d)
@@ -57,7 +61,8 @@ class RoundSwatch(diameterPx: Int = 16) : JPanel() {
             g2.drawOval(x, y, side - 1, side - 1)
 
             glyph?.let { text ->
-                g2.color = JBColor.foreground()
+                g2.color = glyphColor ?: JBColor.foreground()
+
                 g2.font = font.deriveFont(JBUI.scale(10).toFloat())
                 val fm = g2.fontMetrics
                 val tx = (width - fm.stringWidth(text)) / 2

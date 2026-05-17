@@ -61,6 +61,19 @@ Supported formats: SCSS variables, CSS Custom Properties, SCSS Maps, TS/JS prese
     ]]></description>
 
     <change-notes><![CDATA[
+<h3>0.1.5 — Broken-reference detection &amp; sharper suggestions</h3>
+<ul>
+  <li><b>Broken Reference Detection</b>: the Analyser lists token references that don't resolve (<code>var(--foo)</code>, <code>'{token.x.y}'</code>, <code>dt('x.y')</code>) in a dedicated section, and the Hardcoded Values panel flags them inline with a yellow warning. A new <i>Reference integrity</i> axis (20 % weight) joins the global score.</li>
+  <li><b>Resilient JS/TS reference matching</b>: alt+T, completion and go-to now resolve Style-Dictionary refs like <code>'{token.modeLight.informative.default.high.surface.default}'</code> against canonical tokens — leading export binding (<code>token.</code>), mode segment (<code>modeLight</code> / <code>modeDark</code>) and a single camelCase merge / split per path (<code>default.high</code> ↔ <code>defaultHigh</code>) are all tolerated.</li>
+  <li><b>CSS <code>var()</code> inside TS template literals</b>: alt+T now recognises <code>var(--name)</code> inside backtick strings in <code>.ts/.tsx</code>; CSS functional notations (<code>var</code>, <code>calc</code>, <code>rgb*</code>, <code>hsl*</code>, gradients, transforms) are no longer mistaken for JS helper calls.</li>
+  <li><b>Category-scoped suggestions</b>: <code>padding: 6px</code> no longer suggests a 6 px shadow-blur token. The value index is keyed by <code>(category, value)</code> with controlled fallback inside the length family (SPACING, RADIUS, SIZING, TYPOGRAPHY, BORDER).</li>
+  <li><b>Smarter incoherence judgement</b>: <code>--stroke-default: 1px</code> is no longer flagged when the categorizer has already reconciled the name/value clash (here: BORDER).</li>
+  <li><b>Ignored library files</b>: new Settings list to exclude vendored design-system packages from the analyser.</li>
+  <li><b>Scanner refinements</b>: values inside comments and inside <code>var(--x, fallback)</code> fallbacks are no longer reported. Standard CSS named colors are detected. Circular token definitions are no longer flagged as hardcoded.</li>
+  <li><b>UI polish</b>: scope display in the Hardcoded Values panel, scope info right-aligned in toolbars, expandable long Analyser sections, fixed accordion-gap inflation, "Non-existent tokens" renamed to "Broken references".</li>
+  <li><b>API hygiene</b>: removed all usages of IntelliJ APIs marked deprecated or scheduled-for-removal so the plugin loads cleanly on the latest IDE builds.</li>
+</ul>
+
 <h3>0.1.4 — Visual Grid &amp; Polished UX</h3>
 <ul>
   <li><b>Design System Dashboard - Grid View</b>: New visual mode representing tokens as beautiful, interactive cards. Includes visual previews for colors, spacing, and radius.</li>

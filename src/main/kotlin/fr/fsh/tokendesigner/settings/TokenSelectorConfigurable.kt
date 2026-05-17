@@ -16,6 +16,8 @@ import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.JBEmptyBorder
 import com.intellij.util.ui.JBUI
+import fr.fsh.tokendesigner.analyze.DesignSystemAnalyzer
+import fr.fsh.tokendesigner.inspection.LiteralFinder
 import fr.fsh.tokendesigner.scanner.TokenIndex
 import fr.fsh.tokendesigner.ui.IconVariant
 import java.awt.BorderLayout
@@ -23,7 +25,9 @@ import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.GridBagConstraints
 import java.awt.GridBagLayout
+import java.awt.GridLayout
 import java.awt.Insets
+
 import javax.swing.BoxLayout
 import javax.swing.DefaultListModel
 import javax.swing.JComponent
@@ -61,7 +65,12 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
     private val scopePathsList = JBList(scopePathsModel).apply {
         emptyText.text = "Add files or folders that contain tokens for this scope."
     }
+    private val scopeExcludedPathsModel = DefaultListModel<String>()
+    private val scopeExcludedPathsList = JBList(scopeExcludedPathsModel).apply {
+        emptyText.text = "Add files whose variables should be ignored (e.g. library vars)."
+    }
     private val scopeDetailContainer = JPanel(BorderLayout())
+
 
     // Trigger options
     private val hoverCheckBox = JBCheckBox("Show token info (resolved value & variants) on hover")
@@ -195,8 +204,15 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
         if (saved.valueCompletionMinChars != (valueCompletionTriggerCombo.selectedItem as ValueCompletionTrigger).minChars) return true
         if (saved.iconVariantName != (iconVariantCombo.selectedItem as IconVariant).name) return true
         if (saved.inspectVariableDeclarations != inspectVariableDeclarationsCheckBox.isSelected) return true
-        return !sameScopes(saved.scopes, currentScopes())
+        
+        val current = currentScopes()
+        if (saved.scopes.size != current.size) return true
+        return !saved.scopes.zip(current).all { (s1, s2) ->
+            s1.name == s2.name && s1.rootPath == s2.rootPath && 
+            s1.sourcePaths == s2.sourcePaths && s1.excludedPaths == s2.excludedPaths
+        }
     }
+
 
     override fun apply() {
         commitDetailToList()
@@ -320,13 +336,23 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
         scopeRootField.text = row.rootPath
         scopePathsModel.clear()
         row.sourcePaths.forEach(scopePathsModel::addElement)
+        scopeExcludedPathsModel.clear()
+        row.excludedPaths.forEach(scopeExcludedPathsModel::addElement)
         suppressDetailListeners = false
 
+
         val pathsDecorated = ToolbarDecorator.createDecorator(scopePathsList)
-            .setAddAction { addPath() }
-            .setRemoveAction { removeSelectedPaths() }
+            .setAddAction { addPath(scopePathsModel) }
+            .setRemoveAction { removeSelectedPaths(scopePathsList, scopePathsModel) }
             .disableUpDownActions()
             .createPanel()
+
+        val excludedDecorated = ToolbarDecorator.createDecorator(scopeExcludedPathsList)
+            .setAddAction { addPath(scopeExcludedPathsModel) }
+            .setRemoveAction { removeSelectedPaths(scopeExcludedPathsList, scopeExcludedPathsModel) }
+            .disableUpDownActions()
+            .createPanel()
+
 
         val form = JPanel(GridBagLayout())
         val gbc = GridBagConstraints().apply {
@@ -351,17 +377,40 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
         gbc.gridx = 1; gbc.gridy = 2
         form.add(htmlMultiLine("<span style='color:gray'>Empty = common scope (always active).</span>"), gbc)
 
+        val lists = JPanel(GridLayout(2, 1, 0, JBUI.scale(20))).apply {
+            val sources = JPanel(BorderLayout()).apply {
+                val header = JPanel(BorderLayout()).apply {
+                    add(JBLabel("Design System Sources").apply {
+                        font = font.deriveFont(java.awt.Font.BOLD)
+                    }, BorderLayout.NORTH)
+                    add(htmlMultiLine("<span style='color:gray; font-size: 90%'>Files and folders containing the tokens (Source of Truth).</span>"), BorderLayout.CENTER)
+                    border = JBUI.Borders.empty(12, 0, 6, 0)
+                }
+                add(header, BorderLayout.NORTH)
+                add(pathsDecorated, BorderLayout.CENTER)
+            }
+            val excluded = JPanel(BorderLayout()).apply {
+                val header = JPanel(BorderLayout()).apply {
+                    add(JBLabel("Ignored External Variables").apply {
+                        font = font.deriveFont(java.awt.Font.BOLD)
+                    }, BorderLayout.NORTH)
+                    add(htmlMultiLine("<span style='color:gray; font-size: 90%'>Files whose variables should be whitelisted (e.g. library vars).</span>"), BorderLayout.CENTER)
+                    border = JBUI.Borders.empty(12, 0, 6, 0)
+                }
+                add(header, BorderLayout.NORTH)
+                add(excludedDecorated, BorderLayout.CENTER)
+            }
+            add(sources)
+            add(excluded)
+        }
+
         return JPanel(BorderLayout()).apply {
             border = JBUI.Borders.emptyLeft(8)
             add(form, BorderLayout.NORTH)
-            val south = JPanel(BorderLayout()).apply {
-                add(JBLabel("Source files / folders:").apply {
-                    border = JBUI.Borders.empty(8, 0, 4, 0)
-                }, BorderLayout.NORTH)
-                add(pathsDecorated, BorderLayout.CENTER)
-            }
-            add(south, BorderLayout.CENTER)
+            add(lists, BorderLayout.CENTER)
         }
+
+
     }
 
     private fun onDetailEdited() {
@@ -379,26 +428,29 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
         val idx = detailBoundIndex
         if (idx < 0 || idx >= scopesListModel.size) return
         val row = scopesListModel.get(idx)
-        row.name = scopeNameField.text.trim()
         row.rootPath = scopeRootField.text.trim()
         row.sourcePaths.clear()
         for (i in 0 until scopePathsModel.size) row.sourcePaths.add(scopePathsModel.get(i))
+        row.excludedPaths.clear()
+        for (i in 0 until scopeExcludedPathsModel.size) row.excludedPaths.add(scopeExcludedPathsModel.get(i))
     }
 
-    private fun addPath() {
+
+    private fun addPath(model: DefaultListModel<String>) {
         val descriptor = FileChooserDescriptorFactory.createSingleFileOrFolderDescriptor()
-            .withTitle("Add Source File or Folder")
+            .withTitle("Add Path")
         FileChooser.chooseFile(descriptor, project, project.guessProjectDir()) { vf ->
             val rel = relativeToProject(vf) ?: vf.path
-            if ((0 until scopePathsModel.size).none { scopePathsModel.get(it) == rel }) {
-                scopePathsModel.addElement(rel)
+            if ((0 until model.size).none { model.get(it) == rel }) {
+                model.addElement(rel)
             }
         }
     }
 
-    private fun removeSelectedPaths() {
-        scopePathsList.selectedValuesList.toList().forEach(scopePathsModel::removeElement)
+    private fun removeSelectedPaths(list: JBList<String>, model: DefaultListModel<String>) {
+        list.selectedValuesList.toList().forEach(model::removeElement)
     }
+
 
     // ─── Trigger section ──────────────────────────────────────────────────
 
@@ -554,16 +606,23 @@ internal class ScopeRow(
     var name: String,
     var rootPath: String,
     var sourcePaths: MutableList<String>,
+    var excludedPaths: MutableList<String> = mutableListOf(),
 ) {
-    fun toScope(): Scope = Scope(name = name, rootPath = rootPath, sourcePaths = sourcePaths.toList())
+    fun toScope(): Scope = Scope(
+        name = name, 
+        rootPath = rootPath, 
+        sourcePaths = sourcePaths.toList(), 
+        excludedPaths = excludedPaths.toList()
+    )
 
     companion object {
         fun from(scope: Scope): ScopeRow =
-            ScopeRow(scope.name, scope.rootPath, scope.sourcePaths.toMutableList())
+            ScopeRow(scope.name, scope.rootPath, scope.sourcePaths.toMutableList(), scope.excludedPaths.toMutableList())
 
-        fun empty(): ScopeRow = ScopeRow("New scope", "", mutableListOf())
+        fun empty(): ScopeRow = ScopeRow("New scope", "", mutableListOf(), mutableListOf())
     }
 }
+
 
 private class ScopeListRenderer : javax.swing.ListCellRenderer<ScopeRow> {
     private val component = JBLabel().apply { border = JBUI.Borders.empty(4, 8) }

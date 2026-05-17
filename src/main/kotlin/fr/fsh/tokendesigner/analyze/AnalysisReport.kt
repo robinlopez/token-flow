@@ -18,6 +18,7 @@ data class AnalysisReport(
     val duplicateClusters: List<DuplicateCluster>,
     val hardcodedClusters: List<HardcodedCluster>,
     val coverage: Coverage,
+    val brokenReferences: List<BrokenReference>, // references (var, $) that don't exist
     val unusedTokens: List<DesignToken>,         // declared but never referenced anywhere
     val totalTokens: Int,
     val scannedFiles: Int,
@@ -37,6 +38,7 @@ enum class Axis(val displayName: String) {
     USAGE_COVERAGE("Usage coverage"),
     DUPLICATION("Duplication"),
     HARDCODED_PRESSURE("Hardcoded pressure"),
+    REFERENCE_INTEGRITY("Reference integrity"),
 }
 
 /** A token whose declared name doesn't match the kind of value it carries. */
@@ -86,6 +88,14 @@ data class Coverage(
  * `tokens/semantics.ts`). Lets the user see at a glance which catalogs are
  * pulling their weight and which ones drag dead-weight.
  */
+/** A token reference (var(--name), $name) found in code that doesn't exist in the design system. */
+data class BrokenReference(
+    val name: String,
+    val filePath: String,
+    val offset: Int,
+    val line: Int,
+)
+
 data class TokenSourceUsage(
     val filePath: String,
     val declared: Int,                           // tokens declared in this file

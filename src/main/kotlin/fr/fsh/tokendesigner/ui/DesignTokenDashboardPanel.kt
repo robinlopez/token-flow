@@ -6,7 +6,7 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.application.runReadAction
+import fr.fsh.tokendesigner.util.readAction
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
@@ -280,7 +280,17 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
         val toolbar = ActionManager.getInstance()
             .createActionToolbar("DesignTokenDashboard", group, true)
         toolbar.targetComponent = this
-        setToolbar(toolbar.component)
+        
+        val topToolbarRow = JPanel(BorderLayout()).apply {
+            add(toolbar.component, BorderLayout.WEST)
+            val scopeBox = JPanel(java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, JBUI.scale(6), 0)).apply {
+                isOpaque = false
+                add(scopeLabel)
+                add(ScopeUIUtils.createScopeHelpButton(project))
+            }
+            add(scopeBox, BorderLayout.EAST)
+        }
+        setToolbar(topToolbarRow)
     }
 
     private fun setupContent() {
@@ -329,16 +339,8 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
             add(searchField, BorderLayout.CENTER)
             add(actionsPanel, BorderLayout.EAST)
         }
-        val scopeRow = JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(4), 0)).apply {
-            isOpaque = false
-            border = JBUI.Borders.empty(0, 0, 4, 0)
-            add(scopeLabel)
-            add(ScopeUIUtils.createScopeHelpButton(project))
-        }
-
         val north = JPanel(BorderLayout()).apply {
             border = JBUI.Borders.empty(4, 4, 0, 4)
-            add(scopeRow, BorderLayout.NORTH)
             add(searchRow, BorderLayout.CENTER)
             add(filesScroll, BorderLayout.SOUTH)
         }
@@ -395,7 +397,7 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
         object : Task.Backgroundable(project, "Loading design tokens", false) {
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = true
-                val tokens = runReadAction { TokenIndex.getInstance(project).get(activeFile) }
+                val tokens = readAction { TokenIndex.getInstance(project).get(activeFile) }
                 ApplicationManager.getApplication().invokeLater {
                     allTokens = tokens
                     rebuildFileChips()
@@ -630,20 +632,20 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
         }
     }
 
-    override fun getData(dataId: String): Any? {
-        if (com.intellij.openapi.actionSystem.PlatformDataKeys.COPY_PROVIDER.`is`(dataId)) {
-            return object : com.intellij.ide.CopyProvider {
-                override fun performCopy(dataContext: com.intellij.openapi.actionSystem.DataContext) {
-                    val selectedToken = (list.selectedValue as? TokenPopupRow)?.token
-                    if (selectedToken != null) {
-                        val expr = textForInsertion(selectedToken)
-                        com.intellij.openapi.ide.CopyPasteManager.getInstance().setContents(StringSelection(expr))
-                    }
+    override fun uiDataSnapshot(sink: com.intellij.openapi.actionSystem.DataSink) {
+        super.uiDataSnapshot(sink)
+        sink[com.intellij.openapi.actionSystem.PlatformDataKeys.COPY_PROVIDER] = object : com.intellij.ide.CopyProvider {
+            override fun performCopy(dataContext: com.intellij.openapi.actionSystem.DataContext) {
+                val selectedToken = (list.selectedValue as? TokenPopupRow)?.token
+                if (selectedToken != null) {
+                    val expr = textForInsertion(selectedToken)
+                    com.intellij.openapi.ide.CopyPasteManager.getInstance().setContents(StringSelection(expr))
                 }
-                override fun isCopyEnabled(dataContext: com.intellij.openapi.actionSystem.DataContext): Boolean = list.selectedValue is TokenPopupRow
-                override fun isCopyVisible(dataContext: com.intellij.openapi.actionSystem.DataContext): Boolean = true
             }
+            override fun isCopyEnabled(dataContext: com.intellij.openapi.actionSystem.DataContext): Boolean = list.selectedValue is TokenPopupRow
+            override fun isCopyVisible(dataContext: com.intellij.openapi.actionSystem.DataContext): Boolean = true
+            override fun getActionUpdateThread(): com.intellij.openapi.actionSystem.ActionUpdateThread =
+                com.intellij.openapi.actionSystem.ActionUpdateThread.EDT
         }
-        return super.getData(dataId)
     }
 }

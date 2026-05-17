@@ -2,6 +2,35 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/) — versionning [SemVer](https://semver.org/).
 
+## [0.1.5] — 2026-05-17
+
+### Added
+- **Broken Reference Detection** : the Analyser now lists references that don't resolve to any known token (`var(--foo)`, `'{token.x.y}'`, `dt('x.y')`). Surfaced in both the dedicated *Broken references* accordion and inline in the Hardcoded Values panel (yellow warning icon, dedicated row state).
+- **Reference Integrity score** : new 5th axis in the global note (weight 20 %), heavily penalising broken references. Existing weights rebalanced (Semantic 30→20, Usage 30→25, Duplication 20→15, Hardcoded 20).
+- **Smart Suggestions with fallbacks** : when a `var(--token, #fff)` reference is broken, the suggestion engine treats the `#fff` fallback as a value hint and proposes matching colour tokens first. Name-similarity (Levenshtein) suggestions surface even without a fallback.
+- **Ignored Library Files** : Settings → Token Flow now accepts a list of paths to exclude (e.g. vendored design-system packages). Symbols declared inside are dropped from the analyser to keep the false-positive count down.
+- **CSS Named Colors detection** : scanner now identifies standard CSS named colors as hardcoded values.
+- **Scope display in Hardcoded Values** : active scope is shown in the panel toolbar.
+- **Dynamic list expansion** : long Analyser sections now have a clickable `+x more` link.
+
+### Fixed
+- **alt+T on JS token references** : `'{token.modeLight.x.y}'` and `dt('token.x.y')` no longer fall through to "No alternatives found". `TokenNameParser.resolveReference` tolerates a leading export-binding segment (`token.`), a mode segment (`modeLight` / `modeDark`), and a single camelCase merge / split per path (so `default.high` matches `defaultHigh` and vice versa). Completion, goto and the broken-reference check use the same resolver.
+- **CSS `var()` inside TS template literals** : `var(--name)` written inside a backtick string in `.ts/.tsx` is now recognised by alt+T. The detector used to mistake `var(...)` for a JS helper call; CSS functional notations (`var`, `calc`, `rgb*`, `hsl*`, gradients, transforms…) are now excluded from helper-call detection.
+- **Hardcoded suggestions stay in-category** : `padding: 0 6px` used to suggest `--shadow-md-blur: 6px` because the value index ignored category. The index is now keyed by `(category, normalised value)`, with controlled fallback inside the length-bearing family (SPACING, RADIUS, SIZING, TYPOGRAPHY, BORDER). No more bleed into SHADOW, EFFECTS, DURATION, OPACITY or COLOR.
+- **Semantic incoherences respect the categorizer** : `--stroke-default: 1px` is no longer flagged. When `TokenCategorizer` has already reconciled a name-vs-value clash (here: name hints COLOR, value is length → BORDER), the incoherence detector trusts that verdict instead of flagging on the literal name reading.
+- **Analyser accordion spacing** : collapsing every section no longer inflates the gap between headers. The width-cap wrapper now follows the child's preferred height instead of stretching vertically.
+- **Comments ignored in scanner** : values inside code comments are no longer detected.
+- **`var(--token, fallback)` fallbacks** : literals inside the fallback slot are no longer reported as separate hardcoded values.
+- **Circular token definitions** : literals used inside a token's own declaration are no longer flagged.
+- **Levenshtein similarity** : fixed an inverted `copyInto` in the suggestion engine that made name-similarity distances stale beyond the first row.
+
+### Changed
+- **"Non-existent tokens" → "Broken references"** : matches the underlying `BrokenReference` data class and reads as an action item rather than a category.
+- **Deprecated IntelliJ APIs removed** : migrated off `com.intellij.ui.components.labels.ActionLink` (scheduled for removal), the deprecated Kotlin top-level `runReadAction { … }` (11 sites, now routed through a `readAction { }` helper backed by `ReadAction.compute`), and the deprecated `getData(dataId)` override (replaced by `uiDataSnapshot(sink)` with `sink[COPY_PROVIDER] = …`).
+- **UI harmonisation** : scope info right-aligned in toolbars across panels.
+- **SCSS broken-reference noise** : `$name` references are excluded from the broken-reference report (compiler handles them).
+
+
 ## [0.1.4] — 2026-05-15
 
 ### Added

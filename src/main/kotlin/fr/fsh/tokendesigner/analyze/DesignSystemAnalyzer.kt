@@ -1,6 +1,6 @@
 package fr.fsh.tokendesigner.analyze
 
-import com.intellij.openapi.application.runReadAction
+import fr.fsh.tokendesigner.util.readAction
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VfsUtilCore
@@ -21,23 +21,23 @@ import fr.fsh.tokendesigner.settings.TokenSelectorSettings
 /**
  * Computes a [AnalysisReport] for the project's tokens & code.
  *
- * Heavy bits (codebase walk, regex scans) all live behind [runReadAction]
- * so callers must invoke this off the EDT (typically inside a
- * `Task.Backgroundable`).
+ * Heavy bits (codebase walk, regex scans) all run inside a read action so
+ * callers must invoke this off the EDT (typically inside a `Task.Backgroundable`).
  */
 @Service(Service.Level.PROJECT)
 class DesignSystemAnalyzer(private val project: Project) {
 
     fun analyze(scopeFile: VirtualFile? = null): AnalysisReport {
         val started = System.currentTimeMillis()
-        val tokens = runReadAction { TokenIndex.getInstance(project).get(scopeFile) }
+        val tokens = readAction { TokenIndex.getInstance(project).get(scopeFile) }
+        val ignoredNames = collectIgnoredNames(scopeFile)
 
         val incoherences = detectIncoherences(tokens)
         val duplicates = detectDuplicates(tokens)
-        val coverage = computeCoverage(tokens, scopeFile)
-        val hardcoded = collectHardcodedClusters(tokens, coverage.scannedFiles)
-        val unused = tokens.filter { it.name !in coverage.referencedNames }
-            .sortedBy { it.name }
+        val coverage = computeCoverage(tokens, scopeFile, ignoredNames)
+        val broken = coverage.brokenReferences
+        val hardcoded = collectHardcodedClusters(tokens, coverage.scannedFiles, ignoredNames)
+        val unused = tokens.filter { it.name !in coverage.referencedNames }.sortedBy { it.name }
 
         val subScores = computeSubScores(tokens, incoherences, duplicates, coverage, hardcoded)
         val score = subScores.weightedAverage()
@@ -51,6 +51,7 @@ class DesignSystemAnalyzer(private val project: Project) {
             duplicateClusters = duplicates,
             hardcodedClusters = hardcoded,
             coverage = coverage.report,
+            brokenReferences = broken,
             unusedTokens = unused,
             totalTokens = tokens.size,
             scannedFiles = coverage.scannedFiles.size,
@@ -81,6 +82,12 @@ class DesignSystemAnalyzer(private val project: Project) {
             if (raw.isBlank() || isUnresolvedReference(raw) || isCssKeyword(raw)) continue
             val actual = valueFamily(raw) ?: continue
             if (expected.contains(actual)) continue
+            // The categorizer may have already reconciled a name/value clash
+            // (e.g. `--stroke-default: 1px` is assigned BORDER, not COLOR,
+            // because the value is a length). When the assigned category
+            // matches the actual value family, the user's intent is clear and
+            // the literal name reading is misleading — don't flag.
+            if (categoryMatchesValueFamily(token.category, actual)) continue
             out += Incoherence(
                 token = token,
                 expectedCategory = expected.first().tokenCategoryHint,
@@ -89,6 +96,28 @@ class DesignSystemAnalyzer(private val project: Project) {
             )
         }
         return out.sortedBy { it.token.name }
+    }
+
+    /**
+     * Does [category] (the categorizer's verdict, after its own
+     * name-vs-value disambiguation) line up with [valueFamily] (the shape of
+     * the resolved value)? Used to suppress incoherence false-positives where
+     * the categorizer already overrode the name hint.
+     */
+    private fun categoryMatchesValueFamily(category: TokenCategory, valueFamily: ValueFamily): Boolean = when (valueFamily) {
+        ValueFamily.COLOR -> category == TokenCategory.COLOR
+        ValueFamily.DURATION -> category == TokenCategory.DURATION
+        ValueFamily.SHADOW -> category == TokenCategory.SHADOW
+        ValueFamily.NUMBER -> category == TokenCategory.Z_INDEX || category == TokenCategory.OPACITY
+        ValueFamily.LENGTH -> category in setOf(
+            TokenCategory.SPACING,
+            TokenCategory.RADIUS,
+            TokenCategory.SIZING,
+            TokenCategory.TYPOGRAPHY,
+            TokenCategory.BORDER,
+            TokenCategory.LAYOUT,
+            TokenCategory.EFFECTS,
+        )
     }
 
     /**
@@ -212,9 +241,10 @@ class DesignSystemAnalyzer(private val project: Project) {
         /** Every token name found in a `var(--…)`, `$…` or `'{path}'` reference
          *  across the codebase — used downstream for unused-token detection. */
         val referencedNames: Set<String>,
+        val brokenReferences: List<BrokenReference>,
     )
 
-    private fun computeCoverage(tokens: List<DesignToken>, scopeFile: VirtualFile?): CoverageScan {
+    private fun computeCoverage(tokens: List<DesignToken>, scopeFile: VirtualFile?, ignoredNames: Set<String>): CoverageScan {
         val searchScope = GlobalSearchScope.projectScope(project)
         // Compute which **roots** the analyser is allowed to scan. When the
         // user picks a specific scope (i.e. `scopeFile` is non-null), we
@@ -235,7 +265,7 @@ class DesignSystemAnalyzer(private val project: Project) {
             .flatMap { it.sourcePaths }
             .mapNotNull { ScopeResolver.absolutize(project, it) }
         val files = mutableListOf<VirtualFile>()
-        runReadAction {
+        readAction {
             for (ext in COVERAGE_EXTS) {
                 FilenameIndex.getAllFilesByExt(project, ext, searchScope).forEach { vf ->
                     if (rootRestrictions.isNotEmpty() && !isInsideAny(vf, rootRestrictions)) return@forEach
@@ -249,40 +279,47 @@ class DesignSystemAnalyzer(private val project: Project) {
         var literal = 0
         val literalsByFile = mutableMapOf<String, List<LiteralFinder.Hit>>()
         val referenced = mutableSetOf<String>()
+        val broken = mutableListOf<BrokenReference>()
+        val tokenNames = tokens.map { it.name }.toSet()
         val settings = TokenSelectorSettings.getInstance(project)
         val inspectVariableDeclarations = settings.inspectVariableDeclarations
 
         for (vf in files) {
             val text = try {
-                runReadAction { VfsUtilCore.loadText(vf) }
+                readAction { VfsUtilCore.loadText(vf) }
             } catch (_: Exception) { continue }
-            val hits = LiteralFinder.findIn(text).filter { !it.isDeclaration || inspectVariableDeclarations }
-            literalsByFile[vf.path] = hits
-            literal += hits.size
 
-            // Collect every distinct token-reference in this file. Each match
-            // contributes both as a "tokenised" assignment count and as a
-            // referenced-name entry.
-            CSS_REF.findAll(text).forEach {
-                tokenised++
-                referenced += "--" + it.groupValues[1]
+            val hits = LiteralFinder.findIn(text)
+            val filteredHits = hits.filter {
+                it.kind != LiteralFinder.Kind.REFERENCE &&
+                    it.text.lowercase() !in ignoredNames &&
+                    !(it.isDeclaration && (!inspectVariableDeclarations || (it.declarationName != null && it.declarationName in tokenNames)))
             }
-            SCSS_REF.findAll(text).forEach {
+
+            literalsByFile[vf.path] = filteredHits
+            literal += filteredHits.size
+
+            hits.filter { it.kind == LiteralFinder.Kind.REFERENCE }.forEach { hit ->
+                val name = extractTokenName(hit.text) ?: return@forEach
                 tokenised++
-                referenced += "$" + it.groupValues[1]
-            }
-            JS_PATH_REF.findAll(text).forEach {
-                tokenised++
-                val raw = it.groupValues[1]
-                referenced += raw
-                // JS preset paths embed a mode segment (`token.modeLight.x`)
-                // but tokens are indexed under their canonical (mode-stripped)
-                // name — fold both forms in so usage detection matches.
-                fr.fsh.tokendesigner.scanner.TokenNameParser.stripModeSegment(raw)?.let {
-                    canonical -> referenced += canonical
+                referenced += name
+
+                if (name !in tokenNames && name !in ignoredNames && !name.startsWith("$")) {
+                    val resolved = resolveReferenceMatch(name, tokenNames, ignoredNames)
+                    if (resolved == null) {
+                        broken += BrokenReference(
+                            name = hit.text,
+                            filePath = vf.path,
+                            offset = hit.startOffset,
+                            line = lineFor(text, hit.startOffset)
+                        )
+                    } else {
+                        referenced += resolved
+                    }
                 }
             }
         }
+
         val ratio = if (tokenised + literal == 0) 1.0
         else tokenised.toDouble() / (tokenised + literal)
 
@@ -293,7 +330,7 @@ class DesignSystemAnalyzer(private val project: Project) {
             ratio = ratio,
             sources = sources,
         )
-        return CoverageScan(report, literalsByFile, files, referenced)
+        return CoverageScan(report, literalsByFile, files, referenced, broken)
     }
 
     /**
@@ -327,6 +364,7 @@ class DesignSystemAnalyzer(private val project: Project) {
     private fun collectHardcodedClusters(
         tokens: List<DesignToken>,
         scannedFiles: List<VirtualFile>,
+        ignoredNames: Set<String>,
     ): List<HardcodedCluster> {
         val valueIndex = TokenValueIndex(tokens)
         val settings = TokenSelectorSettings.getInstance(project)
@@ -335,15 +373,20 @@ class DesignSystemAnalyzer(private val project: Project) {
         data class Hit(val file: VirtualFile, val line: Int, val offset: Int)
         val byLiteral = LinkedHashMap<String, MutableList<Hit>>()
         val literalKinds = HashMap<String, LiteralFinder.Kind>()
+        val tokenNames = tokens.map { it.name }.toSet()
 
         for (vf in scannedFiles) {
             val text = try {
-                runReadAction { VfsUtilCore.loadText(vf) }
+                readAction { VfsUtilCore.loadText(vf) }
             } catch (_: Exception) { continue }
             for (h in LiteralFinder.findIn(text)) {
                 if (h.insidePartialString) continue
-                if (h.isDeclaration && !inspectVariableDeclarations) continue
+                if (h.kind == LiteralFinder.Kind.REFERENCE) continue
+                if (h.isDeclaration && (!inspectVariableDeclarations || (h.declarationName != null && h.declarationName in tokenNames))) continue
+
                 val key = h.text.lowercase()
+                if (key in ignoredNames) continue
+
                 byLiteral.getOrPut(key) { mutableListOf() }
                     .add(Hit(vf, lineFor(text, h.startOffset), h.startOffset))
                 literalKinds.putIfAbsent(key, h.kind)
@@ -361,6 +404,7 @@ class DesignSystemAnalyzer(private val project: Project) {
                         LiteralFinder.Kind.LENGTH -> TokenCategory.SPACING
                         LiteralFinder.Kind.DURATION -> TokenCategory.DURATION
                         LiteralFinder.Kind.NUMBER -> TokenCategory.SPACING
+                        LiteralFinder.Kind.REFERENCE -> null
                     }
                 }
                 val matching = cat?.let { c -> valueIndex.lookup(lit, c).firstOrNull()?.name }
@@ -390,6 +434,32 @@ class DesignSystemAnalyzer(private val project: Project) {
         return line
     }
 
+    fun collectIgnoredNames(scopeFile: VirtualFile?): Set<String> {
+        val scopes = ScopeResolver.activeScopesFor(project, scopeFile)
+        val excluded = scopes.flatMap { it.excludedPaths }.distinct()
+        if (excluded.isEmpty()) return emptySet()
+
+        val out = mutableSetOf<String>()
+        val fs = com.intellij.openapi.vfs.LocalFileSystem.getInstance()
+        for (path in excluded) {
+            val abs = ScopeResolver.absolutize(project, path) ?: continue
+            val vf = fs.findFileByPath(abs) ?: continue
+            VfsUtilCore.iterateChildrenRecursively(vf, null) { child ->
+                if (!child.isDirectory) {
+                    val text = try {
+                        readAction { VfsUtilCore.loadText(child) }
+                    } catch (_: Exception) { "" }
+                    CSS_REF.findAll(text).forEach { out += "--" + it.groupValues[1] }
+                    SCSS_REF.findAll(text).forEach { out += "$" + it.groupValues[1] }
+                    JS_PATH_REF.findAll(text).forEach { out += it.groupValues[2] }
+                    DT_REF.findAll(text).forEach { out += it.groupValues[2] }
+                }
+                true
+            }
+        }
+        return out
+    }
+
     // ─── Score aggregation ───────────────────────────────────────────────
 
     private fun computeSubScores(
@@ -409,25 +479,38 @@ class DesignSystemAnalyzer(private val project: Project) {
         val literalsTotal = coverage.report.literalAssignments.coerceAtLeast(1)
         val hardcodedScore = (100 - (100.0 * hardcodedHits / literalsTotal)).coerceIn(0.0, 100.0).toInt()
 
+        // Broken references score: penalise relative to the total number of
+        // token references attempted. A broken ref is a real bug (typo, removed
+        // token, wrong path), so a small ratio drags the score down fast.
+        val brokenCount = coverage.brokenReferences.size
+        val refTotal = coverage.report.tokenisedAssignments.coerceAtLeast(1)
+        val referenceIntegrityScore = (100 - (100.0 * brokenCount / refTotal) * 4)
+            .coerceIn(0.0, 100.0).toInt()
+
         return listOf(
             SubScore(
-                Axis.SEMANTIC_COHERENCE, coherenceScore, weight = 30,
+                Axis.SEMANTIC_COHERENCE, coherenceScore, weight = 20,
                 caption = if (incoherences.isEmpty()) "All token names align with their values."
                 else "${incoherences.size} token(s) with mismatched name/value semantics.",
             ),
             SubScore(
-                Axis.USAGE_COVERAGE, coverageScore, weight = 30,
+                Axis.USAGE_COVERAGE, coverageScore, weight = 25,
                 caption = "${coverage.report.tokenisedAssignments} tokenised vs " +
                     "${coverage.report.literalAssignments} literal references.",
             ),
             SubScore(
-                Axis.DUPLICATION, duplicateScore, weight = 20,
+                Axis.DUPLICATION, duplicateScore, weight = 15,
                 caption = if (duplicates.isEmpty()) "No duplicate values detected."
                 else "${duplicates.size} cluster(s), $duplicateOffenders extra token(s).",
             ),
             SubScore(
                 Axis.HARDCODED_PRESSURE, hardcodedScore, weight = 20,
                 caption = "${hardcoded.size} repeated literal(s) worth tokenising.",
+            ),
+            SubScore(
+                Axis.REFERENCE_INTEGRITY, referenceIntegrityScore, weight = 20,
+                caption = if (brokenCount == 0) "All token references resolve cleanly."
+                else "$brokenCount broken token reference(s) detected.",
             ),
         )
     }
@@ -451,9 +534,42 @@ class DesignSystemAnalyzer(private val project: Project) {
         private val COVERAGE_EXTS = listOf("scss", "sass", "css", "ts", "tsx", "js", "jsx")
         // Each pattern's group 1 captures the bare token name so we can fold
         // the references into a single `Set<String>` for unused-token detection.
-        private val CSS_REF = Regex("var\\(\\s*--([A-Za-z_][A-Za-z0-9_-]*)\\s*\\)")
-        private val SCSS_REF = Regex("(?<![A-Za-z0-9_])\\$([A-Za-z_][A-Za-z0-9_-]*)")
-        private val JS_PATH_REF = Regex("['\"`]\\{([A-Za-z_][A-Za-z0-9_.-]*)\\}['\"`]")
+        private val CSS_REF = Regex("var\\(\\s*--([A-Za-z_][A-Za-z0-9_-]*)(?:\\s*,.*)?\\)")
+        private val SCSS_REF = Regex("(?<![A-Za-z0-9_-])\\$([A-Za-z_][A-Za-z0-9_-]*)")
+        private val JS_PATH_REF = Regex("(['\"`])\\{([A-Za-z_][A-Za-z0-9_.-]*)\\}\\1")
+        private val DT_REF = Regex("dt\\(\\s*(['\"`])([A-Za-z_][A-Za-z0-9_.-]*)\\1\\s*\\)")
+
+        fun extractTokenName(text: String): String? {
+            return when {
+                text.startsWith("var(") -> "--" + CSS_REF.find(text)?.groupValues?.get(1)
+                text.startsWith("$") -> SCSS_REF.find(text)?.groupValues?.get(1)?.let { "$" + it }
+                text.startsWith("'") || text.startsWith("\"") || text.startsWith("`") ->
+                    JS_PATH_REF.find(text)?.groupValues?.get(2) ?: DT_REF.find(text)?.groupValues?.get(2)
+                text.startsWith("dt(") -> DT_REF.find(text)?.groupValues?.get(2)
+                else -> null
+            }
+        }
+
+        /**
+         * Resolves a reference name to a known token (or ignored library
+         * symbol). Thin wrapper over [TokenNameParser.resolveReference] that
+         * also accepts the `ignoredNames` set.
+         */
+        fun resolveReferenceMatch(
+            name: String,
+            tokenNames: Set<String>,
+            ignoredNames: Set<String> = emptySet(),
+        ): String? {
+            fr.fsh.tokendesigner.scanner.TokenNameParser
+                .resolveReference(name, tokenNames)?.let { return it.tokenName }
+            if (ignoredNames.isNotEmpty()) {
+                fr.fsh.tokendesigner.scanner.TokenNameParser
+                    .resolveReference(name, ignoredNames)?.let { return it.tokenName }
+            }
+            return null
+        }
+
+
 
         // ─── Incoherence patterns ────────────────────────────────────────
         // Word boundaries so `--text-color` matches "color" but `--scrollbar`
