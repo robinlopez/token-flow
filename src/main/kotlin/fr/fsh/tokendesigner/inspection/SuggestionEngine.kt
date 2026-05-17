@@ -67,6 +67,33 @@ object SuggestionEngine {
                 .take(MAX_SUGGESTIONS)
                 .toList()
         }
+        if (hit.kind == LiteralFinder.Kind.REFERENCE) {
+            val fallback = extractFallback(hit.text)
+            if (fallback != null) {
+                // If the broken reference has a fallback value (e.g. #f0f0f0),
+                // try to suggest tokens that match that specific value first.
+                val kind = if (ColorParser.parse(fallback) != null) LiteralFinder.Kind.COLOR else LiteralFinder.Kind.NUMBER
+                val suggestions = findSuggestions(LiteralFinder.Hit(fallback, 0, 0, kind), valueIndex, allTokens, expectedCategory)
+                if (suggestions.isNotEmpty()) return suggestions
+            }
+
+            val extractedName = fr.fsh.tokendesigner.analyze.DesignSystemAnalyzer.extractTokenName(hit.text) ?: hit.text
+            val name = extractedName.lowercase().removePrefix("--").removePrefix("$")
+
+            return allTokens.asSequence()
+                .filter { token -> expectedCategory == null || token.category == expectedCategory }
+                .map { token ->
+                    val tokenClean = token.name.lowercase().removePrefix("--").removePrefix("$")
+                    val distance = levenshtein(name, tokenClean)
+                    val similarity = 1.0 - (distance.toDouble() / maxOf(name.length, tokenClean.length).coerceAtLeast(1))
+                    TokenSuggestion(token, exact = false, delta = 1.0 - similarity)
+                }
+                .filter { it.delta < 0.4 }
+                .sortedBy { it.delta }
+                .take(MAX_SUGGESTIONS)
+                .toList()
+        }
+
         return emptyList()
     }
 
@@ -141,6 +168,32 @@ object SuggestionEngine {
         return Math.sqrt(dr * dr + dg * dg + db * db + da * da) / 2.0
     }
 
+    private fun extractFallback(text: String): String? {
+        if (!text.startsWith("var(")) return null
+        val comma = text.indexOf(',')
+        if (comma == -1) return null
+        val lastParen = text.lastIndexOf(')')
+        if (lastParen == -1 || lastParen < comma) return null
+        return text.substring(comma + 1, lastParen).trim()
+    }
+
+    private fun levenshtein(s: String, t: String): Int {
+        if (s == t) return 0
+        if (s.isEmpty()) return t.length
+        if (t.isEmpty()) return s.length
+        val v0 = IntArray(t.length + 1) { it }
+        val v1 = IntArray(t.length + 1)
+        for (i in s.indices) {
+            v1[0] = i + 1
+            for (j in t.indices) {
+                val cost = if (s[i] == t[j]) 0 else 1
+                v1[j + 1] = minOf(v1[j] + 1, v0[j + 1] + 1, v0[j] + cost)
+            }
+            v1.copyInto(v0)
+        }
+        return v0[t.length]
+    }
+
     private fun LiteralFinder.Kind.toCategory(): TokenCategory = when (this) {
         LiteralFinder.Kind.COLOR -> TokenCategory.COLOR
         LiteralFinder.Kind.LENGTH -> TokenCategory.SPACING
@@ -150,5 +203,6 @@ object SuggestionEngine {
         // category normalises identical raw numbers to the same key, so the
         // lookup widens across all of them anyway (see `TokenValueIndex`).
         LiteralFinder.Kind.NUMBER -> TokenCategory.SPACING
+        LiteralFinder.Kind.REFERENCE -> TokenCategory.COLOR // arbitrary, won't be used for value lookup
     }
 }

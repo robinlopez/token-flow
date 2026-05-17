@@ -25,6 +25,7 @@ import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.JBUI
+import fr.fsh.tokendesigner.analyze.DesignSystemAnalyzer
 import fr.fsh.tokendesigner.inspection.LiteralFinder
 import fr.fsh.tokendesigner.inspection.PropertyContext
 import fr.fsh.tokendesigner.inspection.SelectorContext
@@ -193,11 +194,13 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
                 // a TS file scan would surface CSS `var(--…)` matches that
                 // can't be inserted there.
                 val tokens = allTokens.filter { it.kind in compatibleKinds(ext) }
+                val ignoredNames = DesignSystemAnalyzer.getInstance(project).collectIgnoredNames(file)
                 val text = runReadAction { editor.document.text }
-                val rows = computeRows(tokens, text)
+                val rows = computeRows(tokens, ignoredNames, text)
                 ApplicationManager.getApplication().invokeLater {
                     showResult(rows, allTokens.isEmpty(), file)
                 }
+
             }
         }.queue()
     }
@@ -216,18 +219,31 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
         else -> fr.fsh.tokendesigner.model.TokenKind.entries.toSet()
     }
 
-    private fun computeRows(tokens: List<DesignToken>, text: String): List<HardcodedRow> {
-        if (tokens.isEmpty()) return emptyList()
+    private fun computeRows(tokens: List<DesignToken>, ignoredNames: Set<String>, text: String): List<HardcodedRow> {
         val valueIndex = TokenValueIndex(tokens)
         val out = mutableListOf<HardcodedRow>()
         val isJs = currentFile?.extension?.lowercase() in JS_EXTS
         val settings = TokenSelectorSettings.getInstance(project)
         val inspectVariableDeclarations = settings.inspectVariableDeclarations
+        val tokenNames = tokens.map { it.name }.toSet()
 
         for (hit in LiteralFinder.findIn(text)) {
-            if (hit.isDeclaration && !inspectVariableDeclarations) continue
+            if (hit.isDeclaration && (!inspectVariableDeclarations || (hit.declarationName != null && hit.declarationName in tokenNames))) continue
             if (hit.kind == LiteralFinder.Kind.NUMBER && !isJs) continue
             if (isJs && hit.insidePartialString) continue
+
+            val isBrokenRef = hit.kind == LiteralFinder.Kind.REFERENCE && run {
+                val name = DesignSystemAnalyzer.extractTokenName(hit.text)
+                if (name == null || name.startsWith("$") || name in ignoredNames) {
+                    false
+                } else {
+                    DesignSystemAnalyzer.resolveReferenceMatch(name, tokenNames, ignoredNames) == null
+                }
+            }
+
+            // Only show references if they are broken
+            if (hit.kind == LiteralFinder.Kind.REFERENCE && !isBrokenRef) continue
+
             val expected = PropertyContext.detectAt(text, hit.startOffset)
             val propertyName = PropertyContext.detectPropertyNameAt(text, hit.startOffset)
             val suggestions = SuggestionEngine.findSuggestions(hit, valueIndex, tokens, expected)
@@ -241,24 +257,26 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
                 selector = selector,
                 category = expected,
                 propertyName = propertyName,
+                isBrokenReference = isBrokenRef
             )
         }
         return out
     }
 
     private fun showResult(rows: List<HardcodedRow>, noTokens: Boolean, file: VirtualFile) {
-        if (noTokens) {
-            showEmpty(
-                "No design tokens are visible from <i>${file.name}</i>.<br/>" +
-                    "Either add this file's folder to a scope's <b>root</b>, " +
-                    "or configure a <b>common</b> scope (empty root) so its tokens apply everywhere.",
-            )
-            return
-        }
         if (rows.isEmpty()) {
-            showEmpty("No hardcoded values detected in <i>${file.name}</i>. ✓")
+            if (noTokens) {
+                showEmpty(
+                    "No design tokens are visible from <i>${file.name}</i>.<br/>" +
+                        "Either add this file's folder to a scope's <b>root</b>, " +
+                        "or configure a <b>common</b> scope (empty root) so its tokens apply everywhere.",
+                )
+            } else {
+                showEmpty("No hardcoded values detected in <i>${file.name}</i>. ✓")
+            }
             return
         }
+
         rebuildRows(rows)
         val matched = rows.count { it.suggestions.isNotEmpty() }
         val unmatched = rows.size - matched
@@ -381,7 +399,9 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
         val category: TokenCategory?,
         val propertyName: String? = null,
         var selectedIndex: Int = 0,
+        val isBrokenReference: Boolean = false,
     )
+
 
     // ─── Visual components ───────────────────────────────────────────────
 
@@ -446,8 +466,9 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
             border = JBUI.Borders.empty(3, 8)
             maximumSize = Dimension(Int.MAX_VALUE, JBUI.scale(38))
 
-            val literalSwatch = swatchFor(row.kind, row.literal, row.category).apply {
-                toolTipText = row.propertyName?.let { "Used as: $it" }
+            val literalSwatch = swatchFor(row.kind, row.literal, row.category, row.isBrokenReference).apply {
+                toolTipText = if (row.isBrokenReference) "Non-existent token: ${row.literal}" 
+                              else row.propertyName?.let { "Used as: $it" }
                     ?: "Hardcoded ${row.kind.name.lowercase()} value"
             }
             // Pin the literal column to a fixed width so every row in every
@@ -502,12 +523,22 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
             const val LITERAL_COL_WIDTH = 140
         }
 
-        private fun swatchFor(kind: LiteralFinder.Kind, literal: String, category: TokenCategory?): RoundSwatch {
+        private fun swatchFor(kind: LiteralFinder.Kind, literal: String, category: TokenCategory?, isBroken: Boolean = false): RoundSwatch {
             val sw = RoundSwatch(diameterPx = 16)
+            if (isBroken) {
+                sw.color = JBColor(0xFFCC00, 0xFFCC00) // Bright yellow
+                sw.glyph = "!"
+                sw.glyphColor = Color.BLACK
+                sw.toolTipText = "Non-existent token reference"
+                return sw
+            }
+
+
             sw.color = if (kind == LiteralFinder.Kind.COLOR) ColorParser.parse(literal) else null
             sw.glyph = if (kind == LiteralFinder.Kind.COLOR) null else CategoryGlyphs.glyphFor(category)
             return sw
         }
+
 
         private fun buildSuggestionWidgets(row: HardcodedRow): Pair<RoundSwatch, JComponent> {
             val swatch = RoundSwatch(diameterPx = 16)

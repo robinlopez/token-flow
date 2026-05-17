@@ -23,11 +23,13 @@ class Scope() {
     @JvmField var name: String = ""
     @JvmField var rootPath: String = ""
     @JvmField var sourcePaths: MutableList<String> = mutableListOf()
+    @JvmField var excludedPaths: MutableList<String> = mutableListOf()
 
-    constructor(name: String, rootPath: String, sourcePaths: List<String>) : this() {
+    constructor(name: String, rootPath: String, sourcePaths: List<String>, excludedPaths: List<String> = emptyList()) : this() {
         this.name = name
         this.rootPath = rootPath
         this.sourcePaths = sourcePaths.toMutableList()
+        this.excludedPaths = excludedPaths.toMutableList()
     }
 
     val isCommon: Boolean get() = rootPath.isBlank()
@@ -36,7 +38,8 @@ class Scope() {
         name: String = this.name,
         rootPath: String = this.rootPath,
         sourcePaths: List<String> = this.sourcePaths,
-    ): Scope = Scope(name, rootPath, sourcePaths)
+        excludedPaths: List<String> = this.excludedPaths,
+    ): Scope = Scope(name, rootPath, sourcePaths, excludedPaths)
 }
 
 @State(
