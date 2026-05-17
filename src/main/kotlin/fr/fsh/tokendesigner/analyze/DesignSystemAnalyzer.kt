@@ -1,6 +1,6 @@
 package fr.fsh.tokendesigner.analyze
 
-import com.intellij.openapi.application.runReadAction
+import fr.fsh.tokendesigner.util.readAction
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VfsUtilCore
@@ -21,16 +21,15 @@ import fr.fsh.tokendesigner.settings.TokenSelectorSettings
 /**
  * Computes a [AnalysisReport] for the project's tokens & code.
  *
- * Heavy bits (codebase walk, regex scans) all live behind [runReadAction]
- * so callers must invoke this off the EDT (typically inside a
- * `Task.Backgroundable`).
+ * Heavy bits (codebase walk, regex scans) all run inside a read action so
+ * callers must invoke this off the EDT (typically inside a `Task.Backgroundable`).
  */
 @Service(Service.Level.PROJECT)
 class DesignSystemAnalyzer(private val project: Project) {
 
     fun analyze(scopeFile: VirtualFile? = null): AnalysisReport {
         val started = System.currentTimeMillis()
-        val tokens = runReadAction { TokenIndex.getInstance(project).get(scopeFile) }
+        val tokens = readAction { TokenIndex.getInstance(project).get(scopeFile) }
         val ignoredNames = collectIgnoredNames(scopeFile)
 
         val incoherences = detectIncoherences(tokens)
@@ -238,7 +237,7 @@ class DesignSystemAnalyzer(private val project: Project) {
             .flatMap { it.sourcePaths }
             .mapNotNull { ScopeResolver.absolutize(project, it) }
         val files = mutableListOf<VirtualFile>()
-        runReadAction {
+        readAction {
             for (ext in COVERAGE_EXTS) {
                 FilenameIndex.getAllFilesByExt(project, ext, searchScope).forEach { vf ->
                     if (rootRestrictions.isNotEmpty() && !isInsideAny(vf, rootRestrictions)) return@forEach
@@ -259,7 +258,7 @@ class DesignSystemAnalyzer(private val project: Project) {
 
         for (vf in files) {
             val text = try {
-                runReadAction { VfsUtilCore.loadText(vf) }
+                readAction { VfsUtilCore.loadText(vf) }
             } catch (_: Exception) { continue }
 
             val hits = LiteralFinder.findIn(text)
@@ -350,7 +349,7 @@ class DesignSystemAnalyzer(private val project: Project) {
 
         for (vf in scannedFiles) {
             val text = try {
-                runReadAction { VfsUtilCore.loadText(vf) }
+                readAction { VfsUtilCore.loadText(vf) }
             } catch (_: Exception) { continue }
             for (h in LiteralFinder.findIn(text)) {
                 if (h.insidePartialString) continue
@@ -420,7 +419,7 @@ class DesignSystemAnalyzer(private val project: Project) {
             VfsUtilCore.iterateChildrenRecursively(vf, null) { child ->
                 if (!child.isDirectory) {
                     val text = try {
-                        runReadAction { VfsUtilCore.loadText(child) }
+                        readAction { VfsUtilCore.loadText(child) }
                     } catch (_: Exception) { "" }
                     CSS_REF.findAll(text).forEach { out += "--" + it.groupValues[1] }
                     SCSS_REF.findAll(text).forEach { out += "$" + it.groupValues[1] }

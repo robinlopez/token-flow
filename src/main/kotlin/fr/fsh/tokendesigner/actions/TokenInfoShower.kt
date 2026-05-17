@@ -1,7 +1,7 @@
 package fr.fsh.tokendesigner.actions
 
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.application.runReadAction
+import fr.fsh.tokendesigner.util.readAction
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.Task
@@ -47,7 +47,7 @@ object TokenInfoShower {
                 indicator.isIndeterminate = true
                 val file = com.intellij.openapi.fileEditor.FileDocumentManager
                     .getInstance().getFile(editor.document)
-                val tokens = runReadAction { TokenIndex.getInstance(project).get(file) }
+                val tokens = readAction { TokenIndex.getInstance(project).get(file) }
                 val tokenNames = tokens.map { it.name }.toSet()
                 val resolved = fr.fsh.tokendesigner.scanner.TokenNameParser
                     .resolveReference(hit.name, tokenNames) ?: return

@@ -5,7 +5,7 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.application.runReadAction
+import fr.fsh.tokendesigner.util.readAction
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.Task
@@ -47,7 +47,7 @@ class GoToTokenDeclarationAction : AnAction() {
         object : Task.Backgroundable(project, "Locating token declaration", true) {
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = true
-                val tokens = runReadAction { TokenIndex.getInstance(project).get(file) }
+                val tokens = readAction { TokenIndex.getInstance(project).get(file) }
                 val tokenNames = tokens.map { it.name }.toSet()
                 val resolved = fr.fsh.tokendesigner.scanner.TokenNameParser
                     .resolveReference(hit.name, tokenNames)

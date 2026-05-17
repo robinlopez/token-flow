@@ -1,7 +1,7 @@
 package fr.fsh.tokendesigner.actions
 
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.application.runReadAction
+import fr.fsh.tokendesigner.util.readAction
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.progress.ProgressIndicator
@@ -44,7 +44,7 @@ object TokenAlternativesShower {
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = true
                 val file = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance().getFile(editor.document)
-                val tokens = runReadAction { TokenIndex.getInstance(project).get(file) }
+                val tokens = readAction { TokenIndex.getInstance(project).get(file) }
                 ApplicationManager.getApplication().invokeLater {
                     if (editor.isDisposed) return@invokeLater
                     showPopup(project, editor, hit, tokens, anchorScreenLocation)
@@ -260,9 +260,9 @@ object TokenAlternativesShower {
                 indicator.isIndeterminate = true
                 val file = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance().getFile(editor.document)
                 val ext = file?.extension?.lowercase()
-                val allTokens = runReadAction { TokenIndex.getInstance(project).get(file) }
+                val allTokens = readAction { TokenIndex.getInstance(project).get(file) }
                 val tokens = allTokens.filter { it.kind in compatibleKinds(ext) }
-                val text = runReadAction { editor.document.text }
+                val text = readAction { editor.document.text }
                 val expected = PropertyContext.detectAt(text, hit.startOffset)
                 val valueIndex = TokenValueIndex(tokens)
                 val suggestions = if (isJsExt(ext) && hit.insidePartialString) emptyList()
@@ -381,7 +381,7 @@ object TokenAlternativesShower {
                 indicator.isIndeterminate = true
                 val file = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance().getFile(editor.document)
                 val ext = file?.extension?.lowercase()
-                val allTokens = runReadAction { TokenIndex.getInstance(project).get(file) }
+                val allTokens = readAction { TokenIndex.getInstance(project).get(file) }
                 val tokens = allTokens.filter { it.kind in compatibleKinds(ext) }
                 val expected = PropertyContext.categoryFor(propertyName)
 

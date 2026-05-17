@@ -7,7 +7,7 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.application.runReadAction
+import fr.fsh.tokendesigner.util.readAction
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.ScrollType
@@ -188,14 +188,14 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
         object : Task.Backgroundable(project, "Scanning hardcoded values", false) {
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = true
-                val allTokens = runReadAction { TokenIndex.getInstance(project).get(file) }
+                val allTokens = readAction { TokenIndex.getInstance(project).get(file) }
                 // Same kind-filter logic as the inspection: only suggest tokens
                 // whose reference syntax fits the destination file. Without it
                 // a TS file scan would surface CSS `var(--…)` matches that
                 // can't be inserted there.
                 val tokens = allTokens.filter { it.kind in compatibleKinds(ext) }
                 val ignoredNames = DesignSystemAnalyzer.getInstance(project).collectIgnoredNames(file)
-                val text = runReadAction { editor.document.text }
+                val text = readAction { editor.document.text }
                 val rows = computeRows(tokens, ignoredNames, text)
                 ApplicationManager.getApplication().invokeLater {
                     showResult(rows, allTokens.isEmpty(), file)
