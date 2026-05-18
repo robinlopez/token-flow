@@ -439,13 +439,20 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
 
     private fun rebuildModel() {
         val needle = searchField.text.trim()
+        // Split needle on whitespace/dash/underscore so "informative content" matches
+        // `--token-informative-highlight-content-hover`. All terms must hit, against
+        // either the name or the resolved value. Empty needle = match-all.
+        val terms = needle
+            .split(Regex("[\\s\\-_]+"))
+            .filter { it.isNotEmpty() }
         val filtered = allTokens.asSequence()
             .filter { it.filePath !in inactiveFiles }
             .filter { familyOf(it) !in excludedFamilies }
-            .filter {
-                needle.isEmpty() ||
-                    it.name.contains(needle, true) ||
-                    it.resolvedValue.contains(needle, true)
+            .filter { token ->
+                terms.isEmpty() || terms.all { term ->
+                    token.name.contains(term, true) ||
+                        token.resolvedValue.contains(term, true)
+                }
             }
             .toList()
         listModel.clear()
