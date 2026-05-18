@@ -61,6 +61,19 @@ Supported formats: SCSS variables, CSS Custom Properties, SCSS Maps, TS/JS prese
     ]]></description>
 
     <change-notes><![CDATA[
+<h3>0.1.6 — Smarter Library, sharper Analyser</h3>
+<ul>
+  <li><b>Multi-term Library search</b>: <code>"informative content"</code> now finds <code>--token-informative-highlight-content-hover</code>. Search splits on spaces/dashes/underscores, every term must match.</li>
+  <li><b>Library kind filter</b>: the funnel popup gets a <i>Token kind</i> section (CSS / SCSS / JS-JSON) above <i>Families</i>. The button highlights when any filter is active.</li>
+  <li><b>Context-aware JS token drop</b>: drag or paste a <code>'{path}'</code> token inside a backtick template literal in TS/JS and it lands as <code>${dt('path')}</code> (or <code>dt('path')</code> inside an existing <code>${…}</code>).</li>
+  <li><b>Stale-analysis banner</b>: after a run, the Analyser watches every file referenced by the report; editing one surfaces a yellow banner offering one-click re-run.</li>
+  <li><b>Reorderable scopes</b>: up/down arrows in Settings, order reflected immediately in the Analyser scope picker.</li>
+  <li><b>Excluded from Analysis (per scope)</b>: new <i>Excludes</i> tab to carve unrelated sub-modules out of a wide scope root.</li>
+  <li><b>Tabbed scope detail</b>: Sources / Whitelist / Excludes split into tabs — no more vertical scroll in the Settings dialog.</li>
+  <li><b>Cleaner Analyser toolbar</b>: redundant <i>Refresh</i> / <i>Re-sync scopes</i> removed; the single action flips to <i>Re-run analysis</i> once a report exists.</li>
+  <li><b>Alt+T preserves <code>dt(…)</code></b>: picking an alternative on <code>${dt('token.x.y')}</code> no longer rewrites it into a bare Style-Dictionary alias and breaks the surrounding template literal.</li>
+</ul>
+
 <h3>0.1.5 — Broken-reference detection &amp; sharper suggestions</h3>
 <ul>
   <li><b>Broken Reference Detection</b>: the Analyser lists token references that don't resolve (<code>var(--foo)</code>, <code>'{token.x.y}'</code>, <code>dt('x.y')</code>) in a dedicated section, and the Hardcoded Values panel flags them inline with a yellow warning. A new <i>Reference integrity</i> axis (20 % weight) joins the global score.</li>
