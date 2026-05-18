@@ -2,6 +2,25 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/) — versionning [SemVer](https://semver.org/).
 
+## [0.1.6] — 2026-05-18
+
+### Added
+- **Multi-term library search** : the Library search field now tokenises the query on spaces, dashes and underscores. Each term must match the token name or value (AND), order-insensitive — typing `informative content` finds `--token-informative-highlight-content-hover`.
+- **Stale-analysis banner** : after running the Analyser, the panel watches every file referenced by the report (broken refs + token-source files). When any of them changes on disk, a yellow banner appears inviting a re-run, so fixing a broken reference no longer leaves the list stale.
+- **Scope reordering** : up/down arrows in Settings → Token Flow → Scopes let you reorder the list. The order is reflected immediately in the Analyser scope picker.
+- **Analysis-exclude paths per scope** : new *Excludes* tab in the scope detail. Folders or files added here are skipped by the Analyser (coverage, broken refs, hardcoded clusters) — useful when a wide scope root contains unrelated sub-modules.
+
+### Changed
+- **Scope detail layout** : the three lists (Sources / Whitelist / Excludes) are now grouped under a tabbed pane instead of stacked sections, removing the vertical scroll in the Settings dialog.
+- **Analyser toolbar** : redundant *Refresh* and *Re-sync scopes* buttons removed. A single *Run analysis* action flips to *Re-run analysis* once a report exists; the new banner covers the auto-detect case the legacy buttons tried to address.
+- **Accordion headers** : in the Analyser, the chevron and title stay left while the item count and the contextual `(?)` icon are pushed to the right edge — easier to scan.
+- **Broken-reference row** : token name on line 1 (red, bold), `filename:line` on line 2 in muted grey — consistent with other Analyser rows.
+
+### Fixed
+- **VFS subscription bug** : the stale-analysis banner now actually fires. The previous wiring subscribed `VirtualFileManager.VFS_CHANGES` on the project message bus, but it is an application-level topic and never delivered events.
+- **Scope combo reorder reflection** : the Analyser scope picker is rebuilt with an atomic `ComboBoxModel` swap rather than a series of `removeAllItems` / `addItem` calls, so reordering scopes in settings always reflects in the dropdown.
+
+
 ## [0.1.5] — 2026-05-17
 
 ### Added
