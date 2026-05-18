@@ -177,6 +177,8 @@ Supported formats: SCSS variables, CSS Custom Properties, SCSS Maps, TS/JS prese
         <postStartupActivity implementation="fr.fsh.tokendesigner.completion.ValueCompletionStartup"/>
 
         <colorProvider implementation="fr.fsh.tokendesigner.provider.TokenColorProvider"/>
+
+        <copyPastePostProcessor implementation="fr.fsh.tokendesigner.actions.JsTokenPathPasteProcessor"/>
     </extensions>
 
     <actions>
