@@ -28,7 +28,6 @@ import fr.fsh.tokendesigner.analyze.Incoherence
 import fr.fsh.tokendesigner.analyze.SubScore
 import fr.fsh.tokendesigner.analyze.TokenSourceUsage
 import fr.fsh.tokendesigner.model.DesignToken
-import fr.fsh.tokendesigner.scanner.TokenIndex
 import fr.fsh.tokendesigner.settings.Scope
 import fr.fsh.tokendesigner.settings.ScopeResolver
 import fr.fsh.tokendesigner.settings.TokenSelectorSettings
@@ -42,7 +41,6 @@ import java.awt.GridLayout
 import javax.swing.BorderFactory
 import javax.swing.Box
 import javax.swing.BoxLayout
-import javax.swing.JButton
 import javax.swing.JComboBox
 import javax.swing.JComponent
 import javax.swing.JLabel
@@ -82,6 +80,51 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
     }
     private var lastReport: AnalysisReport? = null
 
+    /** Files we watch for changes after an analysis: broken-ref locations + token-source files. */
+    private val watchedPaths = mutableSetOf<String>()
+
+    /** Banner shown when any watched file changes — invites the user to re-run. */
+    private val staleBanner: JPanel = run {
+        val bg = JBColor(java.awt.Color(0xFFF4C2), java.awt.Color(0x5C4A1E))
+        val border = JBColor(java.awt.Color(0xE5B800), java.awt.Color(0x8A7028))
+        val fg = JBColor(java.awt.Color(0x6B4F00), java.awt.Color(0xF0E0A0))
+        JPanel(BorderLayout(JBUI.scale(10), 0)).apply {
+            isVisible = false
+            isOpaque = true
+            background = bg
+            this.border = BorderFactory.createCompoundBorder(
+                JBUI.Borders.customLineBottom(border),
+                JBUI.Borders.empty(8, 14),
+            )
+            val left = JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(8), 0)).apply {
+                isOpaque = false
+                add(JLabel(AllIcons.General.BalloonWarning))
+                add(JBLabel(
+                    "<html><b>Analysis is out of date.</b> &nbsp;" +
+                        "<span style='color:#000000'>Files referenced in the report changed since the last run.</span></html>"
+                ).apply {
+                    foreground = fg
+                })
+            }
+            val rerun = com.intellij.ui.components.ActionLink("Re-run analysis") { runAnalysis() }.apply {
+                foreground = fg
+                font = font.deriveFont(java.awt.Font.BOLD)
+            }
+            val dismiss = RoundIconButton(AllIcons.Actions.Close, "Dismiss", sizePx = 18) {
+                staleBanner.isVisible = false
+                staleBanner.revalidate()
+                staleBanner.repaint()
+            }
+            val right = JPanel(FlowLayout(FlowLayout.RIGHT, JBUI.scale(10), 0)).apply {
+                isOpaque = false
+                add(rerun)
+                add(dismiss)
+            }
+            add(left, BorderLayout.CENTER)
+            add(right, BorderLayout.EAST)
+        }
+    }
+
     /**
      * Choice of scope analysed. Sentinel `null` means "all configured scopes /
      * whole project" (we pass `null` to `TokenIndex.get`). Otherwise we pass a
@@ -120,6 +163,8 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
                     "for the selected scope."
             )
             lastReport = null
+            watchedPaths.clear()
+            staleBanner.isVisible = false
         }
     }
 
@@ -127,12 +172,46 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
         rebuildScopeCombo()
         setupToolbar()
         renderEmpty("Click <b>Run analysis</b> to compute the design-system report.")
-        setContent(JBScrollPane(content).apply {
+        val scroll = JBScrollPane(content).apply {
             border = null
             horizontalScrollBarPolicy = JBScrollPane.HORIZONTAL_SCROLLBAR_NEVER
+        }
+        setContent(JPanel(BorderLayout()).apply {
+            add(staleBanner, BorderLayout.NORTH)
+            add(scroll, BorderLayout.CENTER)
         })
         TokenSelectorSettings.getInstance(project).addScopesChangeListener(scopesListener)
         setupEditorTracking()
+        setupFileChangeTracking()
+    }
+
+    /**
+     * Watch VFS changes on files that surfaced in the last report (broken-ref
+     * locations + token-source files). When any of them changes on disk we
+     * surface a banner inviting a re-run — without auto-launching a heavy
+     * analysis while the user is still editing.
+     */
+    private fun setupFileChangeTracking() {
+        // VFS_CHANGES is an application-level topic — subscribing via
+        // `project.messageBus` would silently never fire. Tie the connection's
+        // lifetime to the project so it's disposed alongside the tool window.
+        ApplicationManager.getApplication().messageBus.connect(project).subscribe(
+            com.intellij.openapi.vfs.VirtualFileManager.VFS_CHANGES,
+            object : com.intellij.openapi.vfs.newvfs.BulkFileListener {
+                override fun after(events: MutableList<out com.intellij.openapi.vfs.newvfs.events.VFileEvent>) {
+                    if (watchedPaths.isEmpty() || lastReport == null) return
+                    val touched = events.any { ev ->
+                        val p = ev.path
+                        p.isNotEmpty() && p in watchedPaths
+                    }
+                    if (touched) ApplicationManager.getApplication().invokeLater {
+                        staleBanner.isVisible = true
+                        staleBanner.revalidate()
+                        staleBanner.repaint()
+                    }
+                }
+            }
+        )
     }
     
     private fun setupEditorTracking() {
@@ -147,31 +226,29 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
     }
 
     private fun rebuildScopeCombo() {
-        scopeCombo.removeAllItems()
-        scopeCombo.addItem(ScopeChoice("All project", null))
+        // Build the new list of items in the exact order configured in settings.
+        // Swap the ComboBoxModel atomically so we don't race with Swing's own
+        // selection/listener events between successive removeAllItems/addItem
+        // calls (which used to leave the combo showing a stale order).
+        val items = mutableListOf<ScopeChoice>()
+        items += ScopeChoice("All project", null)
         val activeFile = FileEditorManager.getInstance(project).selectedEditor?.file
         if (activeFile != null) {
-            scopeCombo.addItem(ScopeChoice("Active editor (${activeFile.name})", activeFile))
+            items += ScopeChoice("Active editor (${activeFile.name})", activeFile)
         }
         for (scope in TokenSelectorSettings.getInstance(project).scopes) {
             val rep = representativeFileFor(scope) ?: continue
-            scopeCombo.addItem(ScopeChoice("Scope: ${scope.name.ifBlank { "(unnamed)" }}", rep))
+            items += ScopeChoice("Scope: ${scope.name.ifBlank { "(unnamed)" }}", rep)
         }
-        
+        scopeCombo.model = javax.swing.DefaultComboBoxModel(items.toTypedArray())
+
         if (activeFile != null) {
             val activeScopes = ScopeResolver.activeScopesFor(project, activeFile)
             val deepest = activeScopes.lastOrNull { !it.isCommon }
             if (deepest != null) {
                 val targetName = "Scope: ${deepest.name.ifBlank { "(unnamed)" }}"
-                var found = false
-                for (i in 0 until scopeCombo.itemCount) {
-                    if (scopeCombo.getItemAt(i).label == targetName) {
-                        scopeCombo.selectedIndex = i
-                        found = true
-                        break
-                    }
-                }
-                if (!found && scopeCombo.itemCount > 1) scopeCombo.selectedIndex = 1
+                val match = items.indexOfFirst { it.label == targetName }
+                scopeCombo.selectedIndex = if (match >= 0) match else (if (items.size > 1) 1 else 0)
             } else {
                 scopeCombo.selectedIndex = 0
             }
@@ -185,34 +262,17 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
     }
 
     private fun setupToolbar() {
+        // Single entry point: label flips to "Re-run analysis" once a report exists.
+        // Prior "Refresh" button was redundant with this and confused the toolbar.
         val run = object : AnAction("Run analysis", "Compute the design-system report", AllIcons.Actions.Execute) {
             override fun actionPerformed(e: AnActionEvent) = runAnalysis()
-        }
-        val refresh = object : AnAction("Refresh", "Re-run the analysis", AllIcons.Actions.Refresh) {
-            override fun actionPerformed(e: AnActionEvent) {
-                rebuildScopeCombo()
-                runAnalysis()
+            override fun update(e: AnActionEvent) {
+                e.presentation.text = if (lastReport != null) "Re-run analysis" else "Run analysis"
             }
-        }
-        // Hard re-sync: drop every cached token list and rebuild the combo
-        // from scratch. Useful when the user just edited scopes in settings,
-        // or when the VFS listener somehow missed a token-file change. The
-        // automatic listener above covers the common case; this action is the
-        // explicit fallback the user can trigger when the panel "looks stuck".
-        val resync = object : AnAction(
-            "Re-sync scopes",
-            "Drop token caches and re-read scope settings",
-            AllIcons.Actions.ForceRefresh,
-        ) {
-            override fun actionPerformed(e: AnActionEvent) {
-                TokenIndex.getInstance(project).invalidate()
-                rebuildScopeCombo()
-                lastReport = null
-                renderEmpty("Caches cleared — click <b>Run analysis</b> to recompute.")
-            }
+            override fun getActionUpdateThread() = com.intellij.openapi.actionSystem.ActionUpdateThread.EDT
         }
         val toolbar = ActionManager.getInstance()
-            .createActionToolbar("DesignTokenAnalyze", DefaultActionGroup(run, refresh, resync), true)
+            .createActionToolbar("DesignTokenAnalyze", DefaultActionGroup(run), true)
         toolbar.targetComponent = this
 
         val toolbarRow = JPanel(BorderLayout()).apply {
@@ -232,6 +292,7 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
 
     private fun runAnalysis() {
         renderEmpty("Analysing — scanning project files…", showSpinner = true)
+        staleBanner.isVisible = false
         val scopeFile = selectedScopeFile()
         val scopeLabel = (scopeCombo.selectedItem as? ScopeChoice)?.label ?: "All project"
         object : Task.Backgroundable(project, "Analysing design system", false) {
@@ -240,10 +301,21 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
                 val report = DesignSystemAnalyzer.getInstance(project).analyze(scopeFile)
                 ApplicationManager.getApplication().invokeLater {
                     lastReport = report
+                    rebuildWatchedPaths(report)
                     render(report, scopeLabel)
                 }
             }
         }.queue()
+    }
+
+    /**
+     * Files we'll watch for change events so the "stale" banner can pop up
+     * when the user fixes a broken ref or edits a token catalog.
+     */
+    private fun rebuildWatchedPaths(report: AnalysisReport) {
+        watchedPaths.clear()
+        report.brokenReferences.forEach { watchedPaths.add(it.filePath) }
+        report.coverage.sources.forEach { watchedPaths.add(it.filePath) }
     }
 
     // ─── Rendering ────────────────────────────────────────────────────────
@@ -427,8 +499,8 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
         val panel = verticalList()
         renderTruncatedList(panel, rows, limit = 50) { row ->
             val basename = row.filePath.substringAfterLast('/')
-            val text = "<html><code style='color:#db5858'>${escape(row.name)}</code> &nbsp; — &nbsp; " +
-                "<b>$basename</b>:${row.line}</html>"
+            val text = "<html><b><code style='color:#db5858'>${escape(row.name)}</code></b>" +
+                "<br/><span style='color:#888;font-size:90%'>$basename:${row.line}</span></html>"
             rowPanel(text, locate = { navigateTo(row.filePath, row.offset) })
         }
         return panel
