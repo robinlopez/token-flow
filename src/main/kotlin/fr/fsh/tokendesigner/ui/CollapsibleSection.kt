@@ -33,8 +33,9 @@ class CollapsibleSection(
         if (initiallyCollapsed) AllIcons.General.ArrowRight else AllIcons.General.ArrowDown,
     ).apply { border = JBUI.Borders.emptyRight(8) }
 
-    private val titleLabel = JLabel(
-        "<html><b>$title</b> <span style='color:#888'>· $count</span></html>"
+    private val titleLabel = JLabel("<html><b>$title</b></html>")
+    private val countLabel = JLabel(
+        "<html><span style='color:#888'>$count</span></html>"
     )
 
     private var collapsed: Boolean = initiallyCollapsed
@@ -47,20 +48,29 @@ class CollapsibleSection(
             JBUI.Borders.empty(0),
         )
 
-        val header = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
-            background = JBColor.namedColor("ToolWindow.HeaderBackground", JBColor(0xF5F5F5, 0x3C3F41))
+        val headerBg = JBColor.namedColor("ToolWindow.HeaderBackground", JBColor(0xF5F5F5, 0x3C3F41))
+        val left = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+            isOpaque = false
+            add(chevron)
+            add(titleLabel)
+        }
+        val right = JPanel(FlowLayout(FlowLayout.RIGHT, JBUI.scale(8), 0)).apply {
+            isOpaque = false
+            add(countLabel)
+            if (helpText != null) {
+                add(JLabel(AllIcons.General.ContextHelp).apply {
+                    toolTipText = helpText
+                })
+            }
+        }
+        val header = JPanel(BorderLayout()).apply {
+            background = headerBg
             border = JBUI.Borders.empty(8, 12)
             cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
             isOpaque = true
             alignmentX = Component.LEFT_ALIGNMENT
-            add(chevron)
-            add(titleLabel)
-            if (helpText != null) {
-                add(JLabel(AllIcons.General.ContextHelp).apply {
-                    border = JBUI.Borders.emptyLeft(8)
-                    toolTipText = helpText
-                })
-            }
+            add(left, BorderLayout.WEST)
+            add(right, BorderLayout.EAST)
             addMouseListener(object : java.awt.event.MouseAdapter() {
                 override fun mouseClicked(e: java.awt.event.MouseEvent) = toggle()
             })
