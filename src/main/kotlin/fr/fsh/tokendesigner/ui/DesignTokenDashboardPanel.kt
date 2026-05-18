@@ -30,7 +30,6 @@ import java.awt.CardLayout
 import java.awt.Cursor
 import java.awt.Dimension
 import java.awt.FlowLayout
-import java.awt.datatransfer.StringSelection
 import java.awt.datatransfer.Transferable
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
@@ -81,8 +80,11 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
     private val inactiveFiles = mutableSetOf<String>()
     /** Family names the user has *de-selected*. Empty = everything visible. */
     private val excludedFamilies = mutableSetOf<String>()
+    /** Token-kind groups the user has *de-selected*. Empty = every kind visible. */
+    private val excludedKindGroups = mutableSetOf<TokenKindGroup>()
     private val collapsedCategories = mutableSetOf<String>()
     private var allTokens: List<DesignToken> = emptyList()
+    private var filterButtonRef: RoundIconButton? = null
     private val clearFiltersAction = ClearFiltersAction()
     
     private val scopeLabel = com.intellij.ui.components.JBLabel("Scope: All project").apply {
@@ -218,9 +220,8 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
             })
             add(JMenuItem("Copy token").apply {
                 addActionListener {
-                    val expr = textForInsertion(token)
                     com.intellij.openapi.ide.CopyPasteManager.getInstance()
-                        .setContents(StringSelection(expr))
+                        .setContents(fr.fsh.tokendesigner.actions.TokenDragTransferable.forToken(token))
                 }
             })
         }
@@ -241,9 +242,8 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
         add(JMenuItem("Copy token").apply {
             addActionListener {
                 (list.selectedValue as? TokenPopupRow)?.let { row ->
-                    val expr = fr.fsh.tokendesigner.model.TokenReference.expression(row.token)
                     com.intellij.openapi.ide.CopyPasteManager.getInstance()
-                        .setContents(java.awt.datatransfer.StringSelection(expr))
+                        .setContents(fr.fsh.tokendesigner.actions.TokenDragTransferable.forToken(row.token))
                 }
             }
         })
@@ -303,9 +303,14 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
         // The search bar is paired with a small filter button to its right; the
         // button opens the family-filter popup so that strip below stays
         // dedicated to file-source chips.
-        val filterButton = RoundIconButton(AllIcons.General.Filter, "Filter token families…") {
+        val filterButton = RoundIconButton(AllIcons.General.Filter, "Filter by token kind & family…") {
             showFamilyFilterPopup(it)
         }
+        // Active background highlights when any kind/family is excluded — gives a
+        // visual cue that filters are narrowing the list without rummaging
+        // through the popup.
+        filterButton.isActive = excludedFamilies.isNotEmpty() || excludedKindGroups.isNotEmpty()
+        this.filterButtonRef = filterButton
 
         val viewModeBtn = RoundIconButton(AllIcons.Actions.ListFiles, "View Mode") {}
         fun updateViewModeBtn() {
@@ -439,15 +444,24 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
 
     private fun rebuildModel() {
         val needle = searchField.text.trim()
+        // Split needle on whitespace/dash/underscore so "informative content" matches
+        // `--token-informative-highlight-content-hover`. All terms must hit, against
+        // either the name or the resolved value. Empty needle = match-all.
+        val terms = needle
+            .split(Regex("[\\s\\-_]+"))
+            .filter { it.isNotEmpty() }
         val filtered = allTokens.asSequence()
             .filter { it.filePath !in inactiveFiles }
             .filter { familyOf(it) !in excludedFamilies }
-            .filter {
-                needle.isEmpty() ||
-                    it.name.contains(needle, true) ||
-                    it.resolvedValue.contains(needle, true)
+            .filter { it.kindGroup() !in excludedKindGroups }
+            .filter { token ->
+                terms.isEmpty() || terms.all { term ->
+                    token.name.contains(term, true) ||
+                        token.resolvedValue.contains(term, true)
+                }
             }
             .toList()
+        filterButtonRef?.isActive = excludedFamilies.isNotEmpty() || excludedKindGroups.isNotEmpty()
         listModel.clear()
         gridContainer.removeAll()
         
@@ -507,23 +521,55 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
 
     private fun showFamilyFilterPopup(invoker: javax.swing.JComponent) {
         val byGroup = LinkedHashMap<String, MutableMap<String, Int>>()
+        val kindCounts = LinkedHashMap<TokenKindGroup, Int>().also {
+            TokenKindGroup.entries.forEach { k -> it[k] = 0 }
+        }
         for (token in allTokens) {
             val grp = groupOf(token.category)
             val fam = familyOf(token)
             byGroup.getOrPut(grp) { LinkedHashMap() }
                 .merge(fam, 1, Int::plus)
+            kindCounts[token.kindGroup()] = (kindCounts[token.kindGroup()] ?: 0) + 1
         }
         val content = JPanel().apply {
             layout = javax.swing.BoxLayout(this, javax.swing.BoxLayout.Y_AXIS)
             border = JBUI.Borders.empty(8, 12)
         }
+        val kindCheckboxes = mutableListOf<Pair<TokenKindGroup, javax.swing.JCheckBox>>()
+        content.add(javax.swing.JLabel("<html><b>Token kind</b></html>").apply {
+            alignmentX = java.awt.Component.LEFT_ALIGNMENT
+            foreground = com.intellij.ui.JBColor.GRAY
+            border = JBUI.Borders.empty(0, 0, 4, 0)
+        })
+        for ((kind, count) in kindCounts) {
+            if (count == 0) continue
+            val cb = javax.swing.JCheckBox("${kind.label}  ($count)").apply {
+                isSelected = kind !in excludedKindGroups
+                alignmentX = java.awt.Component.LEFT_ALIGNMENT
+                addActionListener {
+                    if (isSelected) excludedKindGroups.remove(kind)
+                    else excludedKindGroups.add(kind)
+                    rebuildModel()
+                }
+            }
+            kindCheckboxes += kind to cb
+            content.add(cb)
+        }
+        content.add(javax.swing.Box.createVerticalStrut(JBUI.scale(6)))
+        content.add(javax.swing.JSeparator().apply { alignmentX = java.awt.Component.LEFT_ALIGNMENT })
+        content.add(javax.swing.Box.createVerticalStrut(JBUI.scale(8)))
+        content.add(javax.swing.JLabel("<html><b>Families</b></html>").apply {
+            alignmentX = java.awt.Component.LEFT_ALIGNMENT
+            foreground = com.intellij.ui.JBColor.GRAY
+            border = JBUI.Borders.empty(0, 0, 2, 0)
+        })
         val checkboxes = mutableListOf<Pair<String, javax.swing.JCheckBox>>()
         for (group in groupOrder) {
             val families = byGroup[group] ?: continue
-            content.add(javax.swing.JLabel("<html><b>$group</b></html>").apply {
+            content.add(javax.swing.JLabel("<html><i>$group</i></html>").apply {
                 alignmentX = java.awt.Component.LEFT_ALIGNMENT
                 foreground = com.intellij.ui.JBColor.GRAY
-                border = JBUI.Borders.empty(8, 0, 4, 0)
+                border = JBUI.Borders.empty(6, 0, 2, 0)
             })
             for ((family, count) in families.toSortedMap()) {
                 val cb = javax.swing.JCheckBox("$family  ($count)").apply {
@@ -546,7 +592,9 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
             alignmentX = java.awt.Component.LEFT_ALIGNMENT
             addActionListener {
                 excludedFamilies.clear()
+                excludedKindGroups.clear()
                 checkboxes.forEach { (_, cb) -> cb.isSelected = true }
+                kindCheckboxes.forEach { (_, cb) -> cb.isSelected = true }
                 rebuildModel()
             }
         }
@@ -564,7 +612,7 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
             .setRequestFocus(true)
             .setMovable(true)
             .setResizable(true)
-            .setTitle("Family filters")
+            .setTitle("Library filters")
             .createPopup()
             .show(com.intellij.ui.awt.RelativePoint(invoker, java.awt.Point(0, invoker.height)))
     }
@@ -581,9 +629,13 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
 
     private fun insertAtCaret(token: DesignToken) {
         val editor = FileEditorManager.getInstance(project).selectedTextEditor ?: return
-        val toInsert = textForInsertion(token)
+        val ext = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance()
+            .getFile(editor.document)?.extension
         WriteCommandAction.runWriteCommandAction(project, "Insert Design Token", null, {
             val offset = editor.caretModel.offset
+            val toInsert = fr.fsh.tokendesigner.util.TokenInsertion.expressionFor(
+                token, ext, editor.document.charsSequence, offset,
+            )
             editor.document.insertString(offset, toInsert)
             editor.caretModel.moveToOffset(offset + toInsert.length)
         })
@@ -604,7 +656,7 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
 
         override fun createTransferable(c: JComponent): Transferable? {
             val selected = list.selectedValue as? TokenPopupRow ?: return null
-            return StringSelection(textForInsertion(selected.token))
+            return fr.fsh.tokendesigner.actions.TokenDragTransferable.forToken(selected.token)
         }
     }
 
@@ -612,12 +664,13 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
 
     private inner class ClearFiltersAction : AnAction(
         "Clear Filters",
-        "Re-enable every file & family, clear search text",
+        "Re-enable every file, family & token kind, clear search text",
         AllIcons.Actions.Cancel,
     ) {
         override fun update(e: AnActionEvent) {
             e.presentation.isEnabled = inactiveFiles.isNotEmpty() ||
                 excludedFamilies.isNotEmpty() ||
+                excludedKindGroups.isNotEmpty() ||
                 searchField.text.isNotBlank()
         }
 
@@ -626,6 +679,7 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
         override fun actionPerformed(e: AnActionEvent) {
             inactiveFiles.clear()
             excludedFamilies.clear()
+            excludedKindGroups.clear()
             fileChips.values.forEach { it.isSelected = true }
             searchField.text = ""
             rebuildModel()
@@ -638,8 +692,8 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
             override fun performCopy(dataContext: com.intellij.openapi.actionSystem.DataContext) {
                 val selectedToken = (list.selectedValue as? TokenPopupRow)?.token
                 if (selectedToken != null) {
-                    val expr = textForInsertion(selectedToken)
-                    com.intellij.openapi.ide.CopyPasteManager.getInstance().setContents(StringSelection(expr))
+                    com.intellij.openapi.ide.CopyPasteManager.getInstance()
+                        .setContents(fr.fsh.tokendesigner.actions.TokenDragTransferable.forToken(selectedToken))
                 }
             }
             override fun isCopyEnabled(dataContext: com.intellij.openapi.actionSystem.DataContext): Boolean = list.selectedValue is TokenPopupRow
@@ -648,4 +702,25 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
                 com.intellij.openapi.actionSystem.ActionUpdateThread.EDT
         }
     }
+}
+
+/**
+ * Coarse-grained grouping of [TokenKind] for the library kind filter. CSS and
+ * SCSS keep their own bucket because the user often deals with them
+ * separately (e.g. `--token` SCSS file vs `$variable` SCSS partial), while
+ * the three JS/TS flavours are merged since the user-facing distinction is
+ * "this comes from a JSON / TS preset", not the underlying access pattern.
+ */
+internal enum class TokenKindGroup(val label: String) {
+    CSS("CSS"),
+    SCSS("SCSS"),
+    JS("JS / JSON"),
+}
+
+internal fun fr.fsh.tokendesigner.model.DesignToken.kindGroup(): TokenKindGroup = when (kind) {
+    fr.fsh.tokendesigner.model.TokenKind.CSS_CUSTOM_PROPERTY -> TokenKindGroup.CSS
+    fr.fsh.tokendesigner.model.TokenKind.SCSS_VARIABLE -> TokenKindGroup.SCSS
+    fr.fsh.tokendesigner.model.TokenKind.JS_OBJECT_PATH,
+    fr.fsh.tokendesigner.model.TokenKind.JS_RUNTIME_PROPERTY,
+    fr.fsh.tokendesigner.model.TokenKind.JS_RUNTIME_FUNCTION -> TokenKindGroup.JS
 }

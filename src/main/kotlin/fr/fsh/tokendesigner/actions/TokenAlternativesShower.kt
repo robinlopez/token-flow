@@ -237,7 +237,20 @@ object TokenAlternativesShower {
                     fr.fsh.tokendesigner.scanner.TokenNameParser
                         .injectModeSegment(replacement.name, raw, idx)
                 } else replacement.name
-                "'{$bindingPrefix$withMode}'"
+                // Preserve the wrapper form the user already had: `dt('…')`
+                // stays a `dt(…)` call instead of mutating into a Style-
+                // Dictionary alias literal (which would also drop the `${dt(`
+                // when the call sits inside a backtick template literal).
+                val existing = editor.document.charsSequence
+                    .subSequence(hit.startOffset, hit.endOffset).toString()
+                val path = "$bindingPrefix$withMode"
+                when {
+                    existing.startsWith("dt(") -> {
+                        val q = existing.firstOrNull { it == '\'' || it == '"' || it == '`' } ?: '\''
+                        "dt($q$path$q)"
+                    }
+                    else -> "'{$path}'"
+                }
             }
             else -> replacement.name
         }

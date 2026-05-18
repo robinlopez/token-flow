@@ -23,7 +23,6 @@ import java.awt.FlowLayout
 import java.awt.Graphics
 import java.awt.Graphics2D
 import java.awt.RenderingHints
-import java.awt.datatransfer.StringSelection
 import java.awt.datatransfer.Transferable
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
@@ -60,8 +59,8 @@ class TokenCardPanel(
         val actionsPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 0, 0)).apply {
             isOpaque = false
             add(RoundIconButton(AllIcons.Actions.Copy, "Copy value") { btn ->
-                val expr = fr.fsh.tokendesigner.model.TokenReference.expression(token)
-                CopyPasteManager.getInstance().setContents(StringSelection(expr))
+                CopyPasteManager.getInstance()
+                    .setContents(fr.fsh.tokendesigner.actions.TokenDragTransferable.forToken(token))
                 
                 com.intellij.openapi.ui.popup.JBPopupFactory.getInstance()
                     .createHtmlTextBalloonBuilder("Copied!", com.intellij.openapi.ui.MessageType.INFO, null)
@@ -140,7 +139,7 @@ class TokenCardPanel(
         transferHandler = object : TransferHandler() {
             override fun getSourceActions(c: JComponent): Int = COPY
             override fun createTransferable(c: JComponent): Transferable {
-                return StringSelection(fr.fsh.tokendesigner.model.TokenReference.expression(token))
+                return fr.fsh.tokendesigner.actions.TokenDragTransferable.forToken(token)
             }
         }
         addMouseMotionListener(object : java.awt.event.MouseMotionAdapter() {
