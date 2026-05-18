@@ -24,12 +24,25 @@ class Scope() {
     @JvmField var rootPath: String = ""
     @JvmField var sourcePaths: MutableList<String> = mutableListOf()
     @JvmField var excludedPaths: MutableList<String> = mutableListOf()
+    /**
+     * Folders or files inside the scope's root that the Analyser must skip
+     * entirely (different from [excludedPaths] which whitelists external vars).
+     * Lets the user carve unrelated sub-modules out of a wide root.
+     */
+    @JvmField var analysisExcludedPaths: MutableList<String> = mutableListOf()
 
-    constructor(name: String, rootPath: String, sourcePaths: List<String>, excludedPaths: List<String> = emptyList()) : this() {
+    constructor(
+        name: String,
+        rootPath: String,
+        sourcePaths: List<String>,
+        excludedPaths: List<String> = emptyList(),
+        analysisExcludedPaths: List<String> = emptyList(),
+    ) : this() {
         this.name = name
         this.rootPath = rootPath
         this.sourcePaths = sourcePaths.toMutableList()
         this.excludedPaths = excludedPaths.toMutableList()
+        this.analysisExcludedPaths = analysisExcludedPaths.toMutableList()
     }
 
     val isCommon: Boolean get() = rootPath.isBlank()
@@ -39,7 +52,8 @@ class Scope() {
         rootPath: String = this.rootPath,
         sourcePaths: List<String> = this.sourcePaths,
         excludedPaths: List<String> = this.excludedPaths,
-    ): Scope = Scope(name, rootPath, sourcePaths, excludedPaths)
+        analysisExcludedPaths: List<String> = this.analysisExcludedPaths,
+    ): Scope = Scope(name, rootPath, sourcePaths, excludedPaths, analysisExcludedPaths)
 }
 
 @State(

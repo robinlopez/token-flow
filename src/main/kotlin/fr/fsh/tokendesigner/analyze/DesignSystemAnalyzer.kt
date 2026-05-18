@@ -261,9 +261,10 @@ class DesignSystemAnalyzer(private val project: Project) {
         // analyses scope A, scope B's catalog files are unrelated noise. The
         // previous code excluded *all* configured source paths globally,
         // which suppressed useful hits in the scope under analysis.
-        val excluded = activeScopes
-            .flatMap { it.sourcePaths }
-            .mapNotNull { ScopeResolver.absolutize(project, it) }
+        val excluded = (
+            activeScopes.flatMap { it.sourcePaths } +
+                activeScopes.flatMap { it.analysisExcludedPaths }
+            ).mapNotNull { ScopeResolver.absolutize(project, it) }
         val files = mutableListOf<VirtualFile>()
         readAction {
             for (ext in COVERAGE_EXTS) {

@@ -25,7 +25,6 @@ import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.GridBagConstraints
 import java.awt.GridBagLayout
-import java.awt.GridLayout
 import java.awt.Insets
 
 import javax.swing.BoxLayout
@@ -68,6 +67,10 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
     private val scopeExcludedPathsModel = DefaultListModel<String>()
     private val scopeExcludedPathsList = JBList(scopeExcludedPathsModel).apply {
         emptyText.text = "Add files whose variables should be ignored (e.g. library vars)."
+    }
+    private val scopeAnalysisExcludedPathsModel = DefaultListModel<String>()
+    private val scopeAnalysisExcludedPathsList = JBList(scopeAnalysisExcludedPathsModel).apply {
+        emptyText.text = "Add folders/files inside the root to skip during analysis."
     }
     private val scopeDetailContainer = JPanel(BorderLayout())
 
@@ -208,8 +211,9 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
         val current = currentScopes()
         if (saved.scopes.size != current.size) return true
         return !saved.scopes.zip(current).all { (s1, s2) ->
-            s1.name == s2.name && s1.rootPath == s2.rootPath && 
-            s1.sourcePaths == s2.sourcePaths && s1.excludedPaths == s2.excludedPaths
+            s1.name == s2.name && s1.rootPath == s2.rootPath &&
+            s1.sourcePaths == s2.sourcePaths && s1.excludedPaths == s2.excludedPaths &&
+            s1.analysisExcludedPaths == s2.analysisExcludedPaths
         }
     }
 
@@ -277,7 +281,8 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
                     }
                 }
             }
-            .disableUpDownActions()
+            .setMoveUpAction { moveSelectedScope(-1) }
+            .setMoveDownAction { moveSelectedScope(+1) }
             .createPanel()
 
         return JPanel(BorderLayout()).apply {
@@ -338,6 +343,8 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
         row.sourcePaths.forEach(scopePathsModel::addElement)
         scopeExcludedPathsModel.clear()
         row.excludedPaths.forEach(scopeExcludedPathsModel::addElement)
+        scopeAnalysisExcludedPathsModel.clear()
+        row.analysisExcludedPaths.forEach(scopeAnalysisExcludedPathsModel::addElement)
         suppressDetailListeners = false
 
 
@@ -350,6 +357,12 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
         val excludedDecorated = ToolbarDecorator.createDecorator(scopeExcludedPathsList)
             .setAddAction { addPath(scopeExcludedPathsModel) }
             .setRemoveAction { removeSelectedPaths(scopeExcludedPathsList, scopeExcludedPathsModel) }
+            .disableUpDownActions()
+            .createPanel()
+
+        val analysisExcludedDecorated = ToolbarDecorator.createDecorator(scopeAnalysisExcludedPathsList)
+            .setAddAction { addPath(scopeAnalysisExcludedPathsModel) }
+            .setRemoveAction { removeSelectedPaths(scopeAnalysisExcludedPathsList, scopeAnalysisExcludedPathsModel) }
             .disableUpDownActions()
             .createPanel()
 
@@ -377,37 +390,43 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
         gbc.gridx = 1; gbc.gridy = 2
         form.add(htmlMultiLine("<span style='color:gray'>Empty = common scope (always active).</span>"), gbc)
 
-        val lists = JPanel(GridLayout(2, 1, 0, JBUI.scale(20))).apply {
-            val sources = JPanel(BorderLayout()).apply {
-                val header = JPanel(BorderLayout()).apply {
-                    add(JBLabel("Design System Sources").apply {
-                        font = font.deriveFont(java.awt.Font.BOLD)
-                    }, BorderLayout.NORTH)
-                    add(htmlMultiLine("<span style='color:gray; font-size: 90%'>Files and folders containing the tokens (Source of Truth).</span>"), BorderLayout.CENTER)
-                    border = JBUI.Borders.empty(12, 0, 6, 0)
-                }
-                add(header, BorderLayout.NORTH)
-                add(pathsDecorated, BorderLayout.CENTER)
+        fun tabBody(hint: String, listPanel: JComponent): JComponent =
+            JPanel(BorderLayout()).apply {
+                border = JBUI.Borders.empty(8, 4, 4, 4)
+                add(htmlMultiLine("<span style='color:gray; font-size: 90%'>$hint</span>").apply {
+                    border = JBUI.Borders.emptyBottom(6)
+                }, BorderLayout.NORTH)
+                add(listPanel, BorderLayout.CENTER)
             }
-            val excluded = JPanel(BorderLayout()).apply {
-                val header = JPanel(BorderLayout()).apply {
-                    add(JBLabel("Ignored External Variables").apply {
-                        font = font.deriveFont(java.awt.Font.BOLD)
-                    }, BorderLayout.NORTH)
-                    add(htmlMultiLine("<span style='color:gray; font-size: 90%'>Files whose variables should be whitelisted (e.g. library vars).</span>"), BorderLayout.CENTER)
-                    border = JBUI.Borders.empty(12, 0, 6, 0)
-                }
-                add(header, BorderLayout.NORTH)
-                add(excludedDecorated, BorderLayout.CENTER)
-            }
-            add(sources)
-            add(excluded)
+
+        val tabs = com.intellij.ui.components.JBTabbedPane().apply {
+            addTab(
+                "Sources",
+                tabBody(
+                    "Files and folders containing the tokens (Source of Truth).",
+                    pathsDecorated,
+                ),
+            )
+            addTab(
+                "Whitelist",
+                tabBody(
+                    "Files whose variables are external/known — won't be flagged as broken refs.",
+                    excludedDecorated,
+                ),
+            )
+            addTab(
+                "Excludes",
+                tabBody(
+                    "Folders/files inside the root to skip during analysis (e.g. unrelated sub-modules).",
+                    analysisExcludedDecorated,
+                ),
+            )
         }
 
         return JPanel(BorderLayout()).apply {
             border = JBUI.Borders.emptyLeft(8)
             add(form, BorderLayout.NORTH)
-            add(lists, BorderLayout.CENTER)
+            add(tabs, BorderLayout.CENTER)
         }
 
 
@@ -433,6 +452,25 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
         for (i in 0 until scopePathsModel.size) row.sourcePaths.add(scopePathsModel.get(i))
         row.excludedPaths.clear()
         for (i in 0 until scopeExcludedPathsModel.size) row.excludedPaths.add(scopeExcludedPathsModel.get(i))
+        row.analysisExcludedPaths.clear()
+        for (i in 0 until scopeAnalysisExcludedPathsModel.size) row.analysisExcludedPaths.add(scopeAnalysisExcludedPathsModel.get(i))
+    }
+
+    // ─── Reorder ──────────────────────────────────────────────────────────
+
+    /** Swap the selected scope with its neighbour ([delta] = -1 up, +1 down). */
+    private fun moveSelectedScope(delta: Int) {
+        val from = scopesList.selectedIndex
+        val to = from + delta
+        if (from < 0 || to < 0 || to >= scopesListModel.size) return
+        // Persist edits from the detail fields before reordering so we don't
+        // lose what the user just typed into the row about to move.
+        commitDetailToList()
+        val row = scopesListModel.get(from)
+        scopesListModel.remove(from)
+        scopesListModel.add(to, row)
+        scopesList.selectedIndex = to
+        detailBoundIndex = to
     }
 
 
@@ -588,7 +626,9 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
     private fun sameScopes(a: List<Scope>, b: List<Scope>): Boolean {
         if (a.size != b.size) return false
         return a.zip(b).all { (x, y) ->
-            x.name == y.name && x.rootPath == y.rootPath && x.sourcePaths == y.sourcePaths
+            x.name == y.name && x.rootPath == y.rootPath &&
+                x.sourcePaths == y.sourcePaths && x.excludedPaths == y.excludedPaths &&
+                x.analysisExcludedPaths == y.analysisExcludedPaths
         }
     }
 
@@ -607,19 +647,26 @@ internal class ScopeRow(
     var rootPath: String,
     var sourcePaths: MutableList<String>,
     var excludedPaths: MutableList<String> = mutableListOf(),
+    var analysisExcludedPaths: MutableList<String> = mutableListOf(),
 ) {
     fun toScope(): Scope = Scope(
-        name = name, 
-        rootPath = rootPath, 
-        sourcePaths = sourcePaths.toList(), 
-        excludedPaths = excludedPaths.toList()
+        name = name,
+        rootPath = rootPath,
+        sourcePaths = sourcePaths.toList(),
+        excludedPaths = excludedPaths.toList(),
+        analysisExcludedPaths = analysisExcludedPaths.toList(),
     )
 
     companion object {
-        fun from(scope: Scope): ScopeRow =
-            ScopeRow(scope.name, scope.rootPath, scope.sourcePaths.toMutableList(), scope.excludedPaths.toMutableList())
+        fun from(scope: Scope): ScopeRow = ScopeRow(
+            scope.name,
+            scope.rootPath,
+            scope.sourcePaths.toMutableList(),
+            scope.excludedPaths.toMutableList(),
+            scope.analysisExcludedPaths.toMutableList(),
+        )
 
-        fun empty(): ScopeRow = ScopeRow("New scope", "", mutableListOf(), mutableListOf())
+        fun empty(): ScopeRow = ScopeRow("New scope", "", mutableListOf(), mutableListOf(), mutableListOf())
     }
 }
 
