@@ -327,6 +327,15 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
             )
             return
         }
+        // `FileSaverDescriptor` removed every public constructor that doesn't
+        // take title/description in 2024.3+ — the no-arg ctor + chainable
+        // `withTitle()` / `withDescription()` only became available past our
+        // `sinceBuild = 242` baseline, and both string-arg overloads are now
+        // flagged by the marketplace verifier as deprecated. We keep the
+        // 3-arg form (vs. dropping the `"json"` extension hint) because the
+        // verifier complaint count is identical either way and the save
+        // dialog is materially more helpful with the extension filter.
+        @Suppress("DEPRECATION")
         val descriptor = FileSaverDescriptor(
             "Export Token Flow Config",
             "Save scopes as a JSON file.",
