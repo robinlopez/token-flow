@@ -165,17 +165,26 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
     private val mainContentPanel = JPanel(mainContentCards)
 
     init {
-        // Dynamic backgrounds that follow the JBList at paint time. A static
-        // snapshot would freeze whichever theme value happened to be live at
-        // initialisation, leaving stale dark bands behind separator headers
-        // after the user switches to a light theme mid-session. The `JBColor`
-        // producer constructor is officially deprecated in favour of newer
-        // helpers added in 2024.3, but the suppressed signature is still the
-        // canonical way to do this on our `sinceBuild = 242` baseline.
+        // Tie every Library surface to **Panel.background** rather than the
+        // LAF's `List.background`. Some themes (and the user's case in
+        // particular) intentionally diverge — panel = cream / light, list =
+        // editor-dark — so following `list.background` reproduced the dark
+        // band behind separator headers even after we made the lookup
+        // dynamic. Anchoring on Panel.background plus an explicit override of
+        // the JBList itself makes the whole panel honour the IDE theme as a
+        // single visual unit, irrespective of the editor colour scheme.
         @Suppress("DEPRECATION")
-        val listBgProvider = com.intellij.ui.JBColor { list.background }
-        gridContainer.background = listBgProvider
-        stickyHeaderPanel.background = listBgProvider
+        val panelBg = com.intellij.ui.JBColor {
+            com.intellij.util.ui.UIUtil.getPanelBackground()
+        }
+        @Suppress("DEPRECATION")
+        val panelFg = com.intellij.ui.JBColor {
+            com.intellij.util.ui.UIUtil.getLabelForeground()
+        }
+        list.background = panelBg
+        list.foreground = panelFg
+        gridContainer.background = panelBg
+        stickyHeaderPanel.background = panelBg
 
         setupSearch()
         setupListInteractions()
@@ -493,8 +502,11 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
             // theme switches instead of freezing on the value live at
             // construction time.
             viewport.isOpaque = true
+            // Same anchor as the JBList itself — Panel.background, not List.
             @Suppress("DEPRECATION")
-            val viewportBg = com.intellij.ui.JBColor { list.background }
+            val viewportBg = com.intellij.ui.JBColor {
+                com.intellij.util.ui.UIUtil.getPanelBackground()
+            }
             viewport.background = viewportBg
         }
         mainContentPanel.add(scrollList, "LIST")
