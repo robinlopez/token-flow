@@ -31,6 +31,15 @@ class ValueCompletionTypedHandler : TypedHandlerDelegate() {
 
         val offset = editor.caretModel.offset
         val document = editor.document
+        // Vue: only behave like CSS/SCSS when the caret is inside a `<style>`
+        // block — typing in `<template>` / `<script>` must not trigger token
+        // completion or we'd misfire constantly in HTML and JS contexts.
+        if (ext == "vue" &&
+            fr.fsh.tokendesigner.scanner.VueStyleBlockExtractor
+                .effectiveStyleExtAt(document.charsSequence, offset) == null
+        ) {
+            return Result.CONTINUE
+        }
         val lineNumber = document.getLineNumber(offset)
         val lineStart = document.getLineStartOffset(lineNumber)
         val lineText = document.charsSequence.subSequence(lineStart, offset).toString()
@@ -66,7 +75,7 @@ class ValueCompletionTypedHandler : TypedHandlerDelegate() {
         c.isLetterOrDigit() || c == '#' || c == '.' || c == '-' || c == '%' || c == ':' || c == ' '
 
     private companion object {
-        val TARGET_EXTS = setOf("scss", "sass", "css", "ts", "tsx", "js", "jsx", "mjs", "cjs")
+        val TARGET_EXTS = setOf("scss", "sass", "css", "vue", "ts", "tsx", "js", "jsx", "mjs", "cjs")
         // Group 1 = property name, Group 2 = partial value (may have leading spaces).
         val VALUE_CONTEXT = Regex("""([a-zA-Z][a-zA-Z-]*)\s*:\s*([^;{}'"`()\n]*)$""")
         val CSS_VAR_PREFIX = Regex("var\\(\\s*--[a-zA-Z0-9_-]*$")

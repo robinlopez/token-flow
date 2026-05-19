@@ -4,65 +4,62 @@ import fr.fsh.tokendesigner.model.DesignToken
 import fr.fsh.tokendesigner.model.TokenCategory
 
 /**
- * Renders a token's variants as an HTML table — one column per condition
- * (mode/theme/breakpoint), one cell per resolved value. Used both as the
- * tooltip on the Library list and as the body of the hover info popup.
+ * Renders a token's variants as a vertical, justified list — one row per
+ * variant, label on the left, swatch / glyph + resolved value right-aligned.
  *
- * For COLOR tokens each cell shows a swatch + hex code; for everything else
- * the cell shows the raw value (px, rem, ms, …).
+ *     themeOne · light   ● #001a70
+ *     themeOne · dark    ● #ffffff
+ *     themeTwo · light   ● #f3f3f3
+ *     @media ≥1024       16px
  *
- * When a SCSS-map chain reveals **multiple themes** (e.g.
- * `$themes-config: ("themeOne": ("light": …), "dark": …), "themeTwo": (…))`),
- * the header is rendered on two rows — theme name spanning its modes — so the
- * user gets `themeOne / light | dark` instead of an ambiguous
- * `light | dark | light | dark`.
+ * Replaces the previous horizontal table which blew up width-wise as soon as
+ * a token had more than two or three variants. The vertical layout fits any
+ * tooltip box and makes side-by-side comparison easier (one variant per line,
+ * aligned at the value column).
  */
 object VariantTableHtml {
 
-    /** Build the inner `<table>` markup (no `<html>` wrapper). */
+    /** Build the inner markup (no `<html>` wrapper). */
     fun buildBody(token: DesignToken): String {
-        val cols = collectColumns(token)
-        val themes = cols.mapNotNull { it.theme }.distinct()
-        return if (themes.size >= 2) buildGroupedTable(token, cols)
-        else buildFlatTable(token, cols)
+        val rows = collectRows(token)
+        val themes = rows.mapNotNull { it.theme }.distinct()
+        return if (themes.size >= 2) buildGrouped(token, rows) else buildFlat(token, rows)
     }
 
-    /** Same as [buildBody] but wrapped in `<html>` so it can be set on a tooltip / JLabel directly. */
+    /** Same as [buildBody] wrapped in `<html>` for direct use on a JLabel / tooltip. */
     fun build(token: DesignToken): String = "<html>${buildBody(token)}</html>"
 
-    // ─── Column model ─────────────────────────────────────────────────────
+    // ─── Row model ────────────────────────────────────────────────────────
 
-    private data class Col(val theme: String?, val sub: String, val value: String)
+    private data class Row(val theme: String?, val sub: String, val value: String)
 
-    private fun collectColumns(token: DesignToken): List<Col> {
-        val cols = mutableListOf<Col>()
-        val (primaryTheme, primarySub) = parseCondition(token.primaryConditionLabel ?: "")
-        cols += Col(primaryTheme, primarySub, token.resolvedValue)
+    private fun collectRows(token: DesignToken): List<Row> {
+        val rows = mutableListOf<Row>()
+        val (pt, ps) = parseCondition(token.primaryConditionLabel ?: "")
+        rows += Row(pt, ps, token.resolvedValue)
         for (v in token.variants) {
             val (t, s) = parseCondition(v.condition)
-            cols += Col(t, s, v.value)
+            rows += Row(t, s, v.value)
         }
-        return cols
+        return rows
     }
 
     /**
      * Splits a condition chain (e.g. `themeOne light`, `:root.dark`,
-     * `:root @media (min-width: 1024px)`) into a `(theme, sub)` pair.
-     * `sub` becomes the user-facing column header (`light`, `dark`, `≥1024`,
-     * `default`).
+     * `:root @media (min-width: 1024px)`) into a `(theme, sub)` pair. `sub`
+     * becomes the user-facing variant label (`light`, `dark`, `≥1024`,
+     * `default`); `theme` is the SCSS-map theme key when one is present.
      */
     private fun parseCondition(condition: String): Pair<String?, String> {
         val s = condition.trim()
         if (s.isBlank() || s.equals("(top level)", ignoreCase = true)) return null to "default"
 
-        // Breakpoints — no theme grouping makes sense here.
         Regex("min-width\\s*:\\s*(\\d+)\\s*px").find(s)?.let { return null to "≥${it.groupValues[1]}" }
         Regex("max-width\\s*:\\s*(\\d+)\\s*px").find(s)?.let {
             val n = it.groupValues[1].toIntOrNull() ?: return@let
             return null to "<${n + 1}"
         }
 
-        // Pure word chain (SCSS map keys joined by space).
         if (s.matches(Regex("[\\w- ]+"))) {
             val parts = s.split(' ').filter { it.isNotBlank() }
             val modeWord = parts.firstOrNull { isModeWord(it) }
@@ -75,7 +72,6 @@ object VariantTableHtml {
             }
         }
 
-        // Selector-style chains: surface dark/light hints if any.
         Regex("(?i)(?<![A-Za-z0-9_-])(dark[\\w-]*|light[\\w-]*)(?![A-Za-z0-9_-])")
             .find(s)?.let { return null to it.value.lowercase() }
         val cleaned = s
@@ -85,11 +81,7 @@ object VariantTableHtml {
             .trim('(', ')')
             .trim()
             .trimStart('.', ':', '&', ' ')
-        // When the chain only carried structural tokens (`:root`, `@media`, …)
-        // and nothing user-meaningful remains, label the column "default" rather
-        // than re-using the raw chain — otherwise the primary of a token defined
-        // simply under `:root` would surface as a `:root` header.
-        return null to cleaned.ifBlank { "default" }.take(24)
+        return null to cleaned.ifBlank { "default" }.take(32)
     }
 
     private fun isModeWord(s: String): Boolean {
@@ -99,71 +91,90 @@ object VariantTableHtml {
 
     // ─── Renderers ────────────────────────────────────────────────────────
 
-    private fun buildFlatTable(token: DesignToken, cols: List<Col>): String {
-        val isColor = token.category == TokenCategory.COLOR
-        return buildString {
-            append(tableOpen())
-            append("<tr>")
-            for (c in cols) append(headerCell(c.sub))
-            append("</tr><tr>")
-            for (c in cols) append(valueCell(c.value, isColor))
-            append("</tr></table>")
-        }
+    private fun buildFlat(token: DesignToken, rows: List<Row>): String = buildString {
+        append(tableOpen())
+        for (r in rows) append(rowLine(label = r.sub, value = r.value, token = token))
+        append("</table>")
     }
 
-    private fun buildGroupedTable(token: DesignToken, cols: List<Col>): String {
-        val isColor = token.category == TokenCategory.COLOR
-        // Group consecutive columns by theme; preserve the order they were
-        // collected in (important: variants keep their declaration order).
-        data class Group(val theme: String?, val members: MutableList<Col>)
+    /**
+     * Multi-theme tokens get a subtle theme heading row before each block of
+     * mode variants, so a reader can scan `themeOne / light / dark` together
+     * before jumping to `themeTwo`. The heading row has no value cell — it's
+     * purely an organising label.
+     */
+    private fun buildGrouped(token: DesignToken, rows: List<Row>): String {
+        // Group by first appearance of theme key, preserving order.
+        data class Group(val theme: String?, val members: MutableList<Row> = mutableListOf())
         val groups = mutableListOf<Group>()
-        for (c in cols) {
+        for (r in rows) {
             val last = groups.lastOrNull()
-            if (last != null && last.theme == c.theme) last.members.add(c)
-            else groups.add(Group(c.theme, mutableListOf(c)))
+            if (last != null && last.theme == r.theme) last.members.add(r)
+            else groups.add(Group(r.theme, mutableListOf(r)))
         }
         return buildString {
             append(tableOpen())
-            // Row 1: theme names spanning their members.
-            append("<tr>")
-            for (g in groups) {
-                val span = g.members.size
-                append("<td colspan='$span' align='center' bgcolor='#2b2d30' " +
-                    "style='padding:4px 10px;'>")
-                append("<b><font color='#dddddd'>")
-                append(escape(g.theme ?: "—"))
-                append("</font></b></td>")
+            for ((idx, g) in groups.withIndex()) {
+                if (idx > 0) append(spacerRow())
+                append(themeRow(g.theme ?: "—"))
+                for (r in g.members) append(rowLine(label = r.sub, value = r.value, token = token))
             }
-            append("</tr>")
-            // Row 2: sub headers (light/dark/breakpoint/default).
-            append("<tr>")
-            for (c in cols) append(headerCell(c.sub))
-            append("</tr>")
-            // Row 3: values.
-            append("<tr>")
-            for (c in cols) append(valueCell(c.value, isColor))
-            append("</tr></table>")
+            append("</table>")
         }
     }
 
+    // ─── HTML primitives ──────────────────────────────────────────────────
+
+    /**
+     * Outer table is rendered without borders or a collapsed grid — the
+     * justified layout uses cell alignment + a wide padding gap to keep
+     * label / value columns visually separated without drawn lines.
+     */
     private fun tableOpen(): String =
-        "<table cellspacing='0' cellpadding='0' border='1' " +
-            "style='border-collapse:collapse;border-color:#888;'>"
+        "<table cellspacing='0' cellpadding='0' style='border-collapse:collapse;'>"
 
-    private fun headerCell(text: String): String =
-        "<td bgcolor='#3c3f41' style='padding:4px 10px;'>" +
-            "<b><font color='#bbbbbb'>${escape(text)}</font></b></td>"
+    /** Theme heading: small bold caps, dimmed colour, spans both columns. */
+    private fun themeRow(theme: String): String =
+        "<tr><td colspan='2' style='padding:4px 6px 2px 6px;'>" +
+            "<font color='#8a8f95' size='2'><b>${escape(theme.uppercase())}</b></font>" +
+            "</td></tr>"
 
-    private fun valueCell(value: String, isColor: Boolean): String =
-        "<td style='padding:6px 10px;white-space:nowrap;'>${renderValue(value, isColor)}</td>"
+    /** One blank row between theme groups so the eye registers the boundary. */
+    private fun spacerRow(): String =
+        "<tr><td colspan='2' style='padding:4px 0 0 0;'>&nbsp;</td></tr>"
 
-    private fun renderValue(value: String, isColor: Boolean): String {
-        if (!isColor) return escape(value)
-        val color = ColorParser.parse(value)
-            ?: return escape(value)
-        val hex = "#%02X%02X%02X".format(color.red, color.green, color.blue)
-        return "<font color='$hex' size='5'>&#9679;</font>" +
-            "&nbsp;<font face='monospace'>${escape(hex)}</font>"
+    /**
+     * A justified variant row: left cell holds the variant label, right cell
+     * the swatch (colors) or glyph (other categories) + resolved value.
+     * Right-aligned with a generous left padding gap acts as the visual
+     * separator the user asked for (`name | ----- | value`).
+     */
+    private fun rowLine(label: String, value: String, token: DesignToken): String {
+        val isColor = token.category == TokenCategory.COLOR
+        return "<tr>" +
+            "<td align='left' valign='middle' style='padding:3px 24px 3px 6px;'>" +
+            "<font color='#c9cdd2'>${escape(label)}</font>" +
+            "</td>" +
+            "<td align='right' valign='middle' style='padding:3px 6px 3px 0;white-space:nowrap;'>" +
+            renderValue(value, isColor, token.category) +
+            "</td>" +
+            "</tr>"
+    }
+
+    private fun renderValue(value: String, isColor: Boolean, category: TokenCategory?): String {
+        if (isColor) {
+            val color = ColorParser.parse(value)
+            if (color != null) {
+                val hex = "#%02X%02X%02X".format(color.red, color.green, color.blue)
+                return "<font color='$hex' size='5'>&#9679;</font>" +
+                    "&nbsp;<font face='monospace' color='#dddddd'>${escape(hex)}</font>"
+            }
+            return "<font face='monospace' color='#dddddd'>${escape(value)}</font>"
+        }
+        // Non-colour: small category glyph (if any) followed by the value.
+        val glyph = CategoryGlyphs.glyphFor(category)
+        val glyphHtml = if (glyph.isNullOrBlank()) "" else "<font color='#888d93'>${escape(glyph)}</font>&nbsp;"
+        return glyphHtml + "<font face='monospace' color='#dddddd'>${escape(value)}</font>"
     }
 
     private fun escape(s: String): String =

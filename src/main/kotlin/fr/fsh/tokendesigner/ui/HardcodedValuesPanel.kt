@@ -69,11 +69,11 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
     private val emptyState = JBLabel().apply {
         horizontalAlignment = SwingConstants.CENTER
         verticalAlignment = SwingConstants.CENTER
-        foreground = JBColor.GRAY
+        foreground = com.intellij.util.ui.UIUtil.getContextHelpForeground()
     }
     private val statusLabel = JBLabel(" ").apply {
         border = JBUI.Borders.empty(6, 8)
-        foreground = JBColor.GRAY
+        foreground = com.intellij.util.ui.UIUtil.getContextHelpForeground()
     }
     private val centerCard = JPanel(BorderLayout())
     private val scroll = JBScrollPane(rowsContainer).apply {
@@ -90,7 +90,7 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
     @Volatile private var currentFile: VirtualFile? = null
 
     private val scopeLabel = JBLabel("Scope: None").apply {
-        foreground = JBColor.GRAY
+        foreground = com.intellij.util.ui.UIUtil.getContextHelpForeground()
         font = com.intellij.util.ui.JBFont.small()
     }
 
@@ -118,7 +118,22 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
             }
             override fun getActionUpdateThread() = ActionUpdateThread.EDT
         }
-        val group = DefaultActionGroup(refresh, replaceSelectedAction, replaceAll)
+        val hideUnmatched = object : com.intellij.openapi.actionSystem.ToggleAction(
+            "Hide rows without a token suggestion",
+            "When enabled, only literals that have at least one matching design token are listed.",
+            AllIcons.General.Filter,
+        ) {
+            override fun isSelected(e: AnActionEvent): Boolean =
+                TokenSelectorSettings.getInstance(project).hardcodedHideUnmatched
+
+            override fun setSelected(e: AnActionEvent, state: Boolean) {
+                TokenSelectorSettings.getInstance(project).hardcodedHideUnmatched = state
+                rebuildRows(lastRows)
+            }
+
+            override fun getActionUpdateThread() = ActionUpdateThread.EDT
+        }
+        val group = DefaultActionGroup(refresh, replaceSelectedAction, replaceAll, hideUnmatched)
         val toolbar = ActionManager.getInstance().createActionToolbar("DesignTokenHardcoded", group, true)
         toolbar.targetComponent = this
 
@@ -129,7 +144,13 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
                 add(scopeLabel)
                 add(ScopeUIUtils.createScopeHelpButton(project))
             }
-            add(scopeBox, BorderLayout.EAST)
+            // GridBagLayout vertically centres its single child — keeps the
+            // scope chip aligned with the action-toolbar buttons on its left.
+            val scopeCenter = JPanel(java.awt.GridBagLayout()).apply {
+                isOpaque = false
+                add(scopeBox)
+            }
+            add(scopeCenter, BorderLayout.EAST)
         }
         setToolbar(topToolbarRow)
     }
@@ -169,7 +190,7 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
         val ext = file.extension?.lowercase()
         if (ext !in SUPPORTED_EXTS) {
             showEmpty(
-                "Hardcoded value detection runs on .scss / .sass / .css / " +
+                "Hardcoded value detection runs on .scss / .sass / .css / .vue / " +
                     ".ts / .tsx / .js / .jsx files.<br/>Active: ${file.name}"
             )
             return
@@ -215,6 +236,12 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
             fr.fsh.tokendesigner.model.TokenKind.SCSS_VARIABLE,
             fr.fsh.tokendesigner.model.TokenKind.CSS_CUSTOM_PROPERTY,
         )
+        // Vue SFCs can hold both `<style>` and `<style lang="scss">` blocks
+        // — accept the union so a single file may produce both kinds.
+        "vue" -> setOf(
+            fr.fsh.tokendesigner.model.TokenKind.SCSS_VARIABLE,
+            fr.fsh.tokendesigner.model.TokenKind.CSS_CUSTOM_PROPERTY,
+        )
         "css" -> setOf(fr.fsh.tokendesigner.model.TokenKind.CSS_CUSTOM_PROPERTY)
         else -> fr.fsh.tokendesigner.model.TokenKind.entries.toSet()
     }
@@ -222,12 +249,21 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
     private fun computeRows(tokens: List<DesignToken>, ignoredNames: Set<String>, text: String): List<HardcodedRow> {
         val valueIndex = TokenValueIndex(tokens)
         val out = mutableListOf<HardcodedRow>()
-        val isJs = currentFile?.extension?.lowercase() in JS_EXTS
+        val ext = currentFile?.extension?.lowercase()
+        val isJs = ext in JS_EXTS
         val settings = TokenSelectorSettings.getInstance(project)
         val inspectVariableDeclarations = settings.inspectVariableDeclarations
         val tokenNames = tokens.map { it.name }.toSet()
+        // Confine Vue scanning to its `<style>` blocks; literal hits in
+        // `<template>` or `<script>` would otherwise pollute the report.
+        val styleRanges: List<IntRange>? = if (ext == "vue") {
+            fr.fsh.tokendesigner.scanner.VueStyleBlockExtractor.styleRanges(text)
+        } else {
+            null
+        }
 
         for (hit in LiteralFinder.findIn(text)) {
+            if (styleRanges != null && styleRanges.none { hit.startOffset in it }) continue
             if (hit.isDeclaration && (!inspectVariableDeclarations || (hit.declarationName != null && hit.declarationName in tokenNames))) continue
             if (hit.kind == LiteralFinder.Kind.NUMBER && !isJs) continue
             if (isJs && hit.insidePartialString) continue
@@ -277,10 +313,9 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
             return
         }
 
+        // rebuildRows owns the status line — it knows whether the unmatched
+        // filter is on and produces a tally that reflects the visible subset.
         rebuildRows(rows)
-        val matched = rows.count { it.suggestions.isNotEmpty() }
-        val unmatched = rows.size - matched
-        statusLabel.text = "${rows.size} value(s) — $matched with token suggestion, $unmatched without"
     }
 
     private fun rebuildRows(rows: List<HardcodedRow>) {
@@ -290,9 +325,19 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
         rowsContainer.removeAll()
         rowComponents.clear()
 
+        val hideUnmatched = TokenSelectorSettings.getInstance(project).hardcodedHideUnmatched
+        val visibleRows = if (hideUnmatched) {
+            // Broken references are kept even without a suggestion — those are
+            // actionable (the user needs to fix the dangling token name), and
+            // suppressing them would defeat the broken-ref UX.
+            rows.filter { it.suggestions.isNotEmpty() || it.isBrokenReference }
+        } else {
+            rows
+        }
+
         // Group preserving source order; rows from the same selector cluster together.
         val grouped = LinkedHashMap<String, MutableList<HardcodedRow>>()
-        for (r in rows) grouped.getOrPut(r.selector) { mutableListOf() } += r
+        for (r in visibleRows) grouped.getOrPut(r.selector) { mutableListOf() } += r
 
         for ((selector, group) in grouped) {
             val isCollapsed = selector in collapsedSelectors
@@ -314,6 +359,18 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
         rowsContainer.revalidate()
         rowsContainer.repaint()
         updateSelectedAction()
+
+        // Status line: keep the "matched / unmatched" tally based on the full
+        // result so the user always sees how many were hidden by the filter.
+        val total = rows.size
+        val matched = rows.count { it.suggestions.isNotEmpty() }
+        val unmatched = total - matched
+        statusLabel.text = when {
+            total == 0 -> " "
+            hideUnmatched && unmatched > 0 ->
+                "$total value(s) — $matched with token suggestion · $unmatched hidden"
+            else -> "$total value(s) — $matched with token suggestion, $unmatched without"
+        }
     }
 
     private fun toggleSelector(selector: String) {
@@ -426,7 +483,7 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
                 if (collapsed) AllIcons.General.ArrowRight else AllIcons.General.ArrowDown,
             ).apply { border = JBUI.Borders.emptyRight(6) }
             val text = JBLabel("${label.uppercase()} · $count").apply {
-                foreground = JBColor.GRAY
+                foreground = com.intellij.util.ui.UIUtil.getContextHelpForeground()
                 font = font.deriveFont(font.size2D - 1f).deriveFont(java.awt.Font.BOLD)
             }
             val left = JPanel(java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0)).apply {
@@ -463,8 +520,13 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
 
         init {
             isOpaque = false
-            border = JBUI.Borders.empty(3, 8)
-            maximumSize = Dimension(Int.MAX_VALUE, JBUI.scale(38))
+            // Rows indent a hair to the right of the selector header chevron
+            // (8 + 14 ≈ chevron x-coord) so they nest visually under their
+            // group instead of starting flush left — matches the indentation
+            // hierarchy users expect from a tree-like list. Right padding is
+            // generous so the apply / locate icons don't crowd the edge.
+            border = JBUI.Borders.empty(4, 22, 4, 8)
+            maximumSize = Dimension(Int.MAX_VALUE, JBUI.scale(40))
 
             val literalSwatch = swatchFor(row.kind, row.literal, row.category, row.isBrokenReference).apply {
                 toolTipText = if (row.isBrokenReference) "Non-existent token: ${row.literal}" 
@@ -473,9 +535,11 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
             }
             // Pin the literal column to a fixed width so every row in every
             // selector group lines up its arrow / suggestion column at the
-            // exact same x-coordinate.
+            // exact same x-coordinate. Narrower than before — most literals
+            // are 4-8 chars (`12px`, `#fff`, `1.5rem`) and the previous 140 px
+            // wasted half a row's horizontal real-estate.
             val literalLabel = JLabel(row.literal).apply {
-                border = JBUI.Borders.emptyLeft(6)
+                border = JBUI.Borders.emptyLeft(4)
                 toolTipText = row.propertyName?.let { "Used as: $it" }
                 preferredSize = Dimension(JBUI.scale(LITERAL_COL_WIDTH), JBUI.scale(22))
                 minimumSize = preferredSize
@@ -520,7 +584,11 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
         }
 
         private companion object {
-            const val LITERAL_COL_WIDTH = 140
+            const val LITERAL_COL_WIDTH = 110
+            // Combo height tuned so the selected value (which uses the
+            // default JComboBox renderer) is fully visible in the closed
+            // editor — 26 px was clipping descenders on most platforms.
+            const val COMBO_HEIGHT = 30
         }
 
         private fun swatchFor(kind: LiteralFinder.Kind, literal: String, category: TokenCategory?, isBroken: Boolean = false): RoundSwatch {
@@ -547,7 +615,7 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
                 swatch.glyph = "?"
                 swatch.toolTipText = "No matching token"
                 val label = JBLabel("(no matching token)").apply {
-                    foreground = JBColor.GRAY
+                    foreground = com.intellij.util.ui.UIUtil.getContextHelpForeground()
                     font = font.deriveFont(java.awt.Font.ITALIC)
                 }
                 return swatch to label
@@ -566,10 +634,9 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
                     row.suggestions.forEach { addItem(it.token.name) }
                     selectedIndex = row.selectedIndex
                     font = font.deriveFont(font.size2D - 1f)
-                    // Slightly bigger so the descender of the font isn't clipped.
-                    preferredSize = Dimension(JBUI.scale(240), JBUI.scale(26))
+                    preferredSize = Dimension(JBUI.scale(240), JBUI.scale(COMBO_HEIGHT))
                     minimumSize = preferredSize
-                    maximumSize = Dimension(Int.MAX_VALUE, JBUI.scale(26))
+                    maximumSize = Dimension(Int.MAX_VALUE, JBUI.scale(COMBO_HEIGHT))
                     addActionListener {
                         row.selectedIndex = selectedIndex.coerceAtLeast(0)
                         applySwatch(swatch, row.suggestions[row.selectedIndex])
@@ -610,7 +677,7 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
 
     companion object {
         private val SUPPORTED_EXTS = setOf(
-            "scss", "sass", "css",
+            "scss", "sass", "css", "vue",
             "ts", "tsx", "js", "jsx", "mjs", "cjs",
         )
         private val JS_EXTS = setOf("ts", "tsx", "js", "jsx", "mjs", "cjs")

@@ -82,9 +82,51 @@ class TokenScanner(private val project: Project) {
         } catch (_: Exception) {
             return
         }
-        val isScss = file.extension?.lowercase() in SCSS_EXTS
+        val ext = file.extension?.lowercase()
         val path = file.path
 
+        when (ext) {
+            "vue" -> extractFromVue(text, path, sink)
+            else -> {
+                val isScss = ext in SCSS_EXTS
+                extractCssLike(text, isScss, path, blockOffset = 0, sink)
+            }
+        }
+        // TS/JS files: dispatch to the right parser (Style-Dictionary preset
+        // vs. runtime object theme). The registry picks one strategy per file
+        // so the index stays free of cross-flavour duplicates. For runtime
+        // files we also extract callable helpers (`spacing`, `radius`, …) so
+        // they show up in the library and feed helper-aware suggestions.
+        if (ext in JS_EXTS) {
+            extractJsLike(text, path, sink)
+        }
+    }
+
+    /**
+     * Vue SFC: only the contents of `<style …>` blocks are eligible for
+     * token detection. Each block is scanned with the CSS or SCSS regex set
+     * depending on its `lang` attribute, and emitted offsets are translated
+     * back to file-absolute coordinates so the locator / gutter swatches
+     * still navigate to the correct line inside the .vue file.
+     */
+    private fun extractFromVue(text: CharSequence, path: String, sink: MutableList<RawToken>) {
+        for (block in VueStyleBlockExtractor.extract(text)) {
+            // `src="…"` blocks point at an external file — that file is
+            // scanned by the normal extension walker, so skipping here avoids
+            // a duplicate emission with broken offsets.
+            if (block.src != null || block.text.isEmpty()) continue
+            val isScss = block.lang in SCSS_BLOCK_LANGS
+            extractCssLike(block.text, isScss, path, block.startOffset, sink)
+        }
+    }
+
+    private fun extractCssLike(
+        text: CharSequence,
+        isScss: Boolean,
+        path: String,
+        blockOffset: Int,
+        sink: MutableList<RawToken>,
+    ) {
         if (isScss) {
             for (m in SCSS_VAR_REGEX.findAll(text)) {
                 val raw = m.groupValues[2].trim().trimEnd(';').trim()
@@ -94,19 +136,16 @@ class TokenScanner(private val project: Project) {
                     rawValue = cleanedRaw,
                     kind = TokenKind.SCSS_VARIABLE,
                     filePath = path,
-                    offset = m.range.first,
+                    offset = m.range.first + blockOffset,
                 )
             }
-            // SCSS map keys: `"some-token": value,` — typical Style-Dictionary-style sources
-            // where the canonical names are stored as quoted map entries. We promote these
-            // to CSS_CUSTOM_PROPERTY because that is how they will be referenced (`var(--name)`).
             for (m in SCSS_MAP_KEY_REGEX.findAll(text)) {
                 sink += RawToken(
                     name = "--" + m.groupValues[1],
                     rawValue = m.groupValues[2].trim(),
                     kind = TokenKind.CSS_CUSTOM_PROPERTY,
                     filePath = path,
-                    offset = m.range.first,
+                    offset = m.range.first + blockOffset,
                 )
             }
         }
@@ -118,36 +157,32 @@ class TokenScanner(private val project: Project) {
                 rawValue = cleanedRaw,
                 kind = TokenKind.CSS_CUSTOM_PROPERTY,
                 filePath = path,
-                offset = m.range.first,
+                offset = m.range.first + blockOffset,
             )
         }
-        // TS/JS files: dispatch to the right parser (Style-Dictionary preset
-        // vs. runtime object theme). The registry picks one strategy per file
-        // so the index stays free of cross-flavour duplicates. For runtime
-        // files we also extract callable helpers (`spacing`, `radius`, …) so
-        // they show up in the library and feed helper-aware suggestions.
-        if (file.extension?.lowercase() in JS_EXTS) {
-            val parsed = JsTokenFileParserRegistry.parseFull(text)
-            val kind = JsTokenFileParserRegistry.parserFor(parsed.mode).kind
-            for (leaf in parsed.leaves) {
-                sink += RawToken(
-                    name = leaf.path,
-                    rawValue = leaf.value,
-                    kind = kind,
-                    filePath = path,
-                    offset = leaf.offset,
-                )
-            }
-            for (helper in parsed.helpers) {
-                sink += RawToken(
-                    name = helper.name,
-                    rawValue = "${helper.unitSource} × ${helper.paramName}",
-                    kind = TokenKind.JS_RUNTIME_FUNCTION,
-                    filePath = path,
-                    offset = helper.offset,
-                    functionUnit = helper.unit,
-                )
-            }
+    }
+
+    private fun extractJsLike(text: CharSequence, path: String, sink: MutableList<RawToken>) {
+        val parsed = JsTokenFileParserRegistry.parseFull(text)
+        val kind = JsTokenFileParserRegistry.parserFor(parsed.mode).kind
+        for (leaf in parsed.leaves) {
+            sink += RawToken(
+                name = leaf.path,
+                rawValue = leaf.value,
+                kind = kind,
+                filePath = path,
+                offset = leaf.offset,
+            )
+        }
+        for (helper in parsed.helpers) {
+            sink += RawToken(
+                name = helper.name,
+                rawValue = "${helper.unitSource} × ${helper.paramName}",
+                kind = TokenKind.JS_RUNTIME_FUNCTION,
+                filePath = path,
+                offset = helper.offset,
+                functionUnit = helper.unit,
+            )
         }
     }
 
@@ -335,7 +370,9 @@ class TokenScanner(private val project: Project) {
         private const val MAX_FILE_BYTES = 2L * 1024 * 1024
         private val SCSS_EXTS = setOf("scss", "sass")
         private val JS_EXTS = setOf("ts", "tsx", "js", "jsx", "mjs", "cjs")
-        private val TARGET_EXTENSIONS = listOf("scss", "sass", "css", "ts", "tsx", "js", "jsx", "mjs", "cjs")
+        /** `<style lang="…">` values that should run the SCSS regex set in addition to CSS. */
+        private val SCSS_BLOCK_LANGS = setOf("scss", "sass")
+        private val TARGET_EXTENSIONS = listOf("scss", "sass", "css", "vue", "ts", "tsx", "js", "jsx", "mjs", "cjs")
         private val TARGET_EXTENSIONS_SET = TARGET_EXTENSIONS.toSet()
 
         private val SCSS_VAR_REGEX = Regex(

@@ -61,6 +61,21 @@ Supported formats: SCSS variables, CSS Custom Properties, SCSS Maps, TS/JS prese
     ]]></description>
 
     <change-notes><![CDATA[
+<h3>0.1.7 — Portable scope configuration, smarter Library &amp; Vue SFCs</h3>
+<ul>
+  <li><b>Vue Single File Components (<code>.vue</code>)</b>: tokens declared in <code>&lt;style&gt;</code> and <code>&lt;style lang="scss"&gt;</code> blocks of a Vue SFC are now indexed, listed in the Library, counted in audit coverage, and benefit from hardcoded-value detection / completion / Alt+T / Go-to-declaration. Text-based implementation — no dependency on the Vue plugin — so it works on Community and Ultimate. Scanning is confined to inline style blocks, so <code>&lt;template&gt;</code> and <code>&lt;script&gt;</code> sections stay untouched.</li>
+  <li><b>Export Config</b>: Settings → Token Flow → Scopes now has an <i>Export…</i> link that writes the current scopes to a JSON file. Share it with the team, commit it next to the project, or keep it as a backup.</li>
+  <li><b>Import Config</b>: paired <i>Import…</i> link reads a JSON file produced by Export. The plugin asks whether to <b>Replace</b> the current scopes or <b>Merge</b> (existing scopes with the same name are overwritten, new ones are appended). Pending edits are persisted via Apply, so a teammate can preview the import before committing.</li>
+  <li><b>Versioned format</b>: the JSON file carries a schema version. Older Token Flow builds refuse files produced by a future schema instead of silently dropping fields.</li>
+  <li><b>Library family / sub-family grouping</b>: inside each big category accordion, the Library can now insert a two-level hierarchy of headers — family (<code>HIGH</code>, <code>LOW</code>, <code>PRIMARY</code>) and sub-family (<code>SURFACE</code>, <code>CONTENT</code>, <code>STROKE</code>, …) — derived from the structure of token names alone. No hard-coded vocabulary; the algorithm adapts to any naming convention. Tokens indent under their header so the alignment reads like a tree. New toolbar toggle (group-by icon) next to the view-mode button; off by default — opt in from the panel.</li>
+  <li><b>Sticky category header</b>: scroll past a category and its header pins to the top of the Library viewport, with the same chevron behaviour as the in-list row.</li>
+  <li><b>Justified category bar</b>: layout is now <code>[chevron] TITLE … (count)</code>, with the count badge tinted so it can't be mistaken for a resolved token value.</li>
+  <li><b>Two-way kind / file-chip sync</b>: ticking a token-kind in the Library filter popup now flips every file chip of that kind in the strip below the search bar, and vice-versa — the two filter surfaces no longer drift.</li>
+  <li><b>Variant tooltip — vertical layout</b>: per-variant tooltips now render one line per variant (label left, swatch / glyph + value right) instead of a wide horizontal table that overflowed once a token had several variants. Multi-theme tokens get discrete theme subheaders.</li>
+  <li><b>Hardcoded Values — tighter rows &amp; hide-no-match filter</b>: rows nest under their selector header, the literal column is narrower, the suggestion combo is taller (no more clipped descenders), and a new toolbar toggle hides literals without any matching token (on by default — broken references stay visible because they're actionable).</li>
+  <li><b>Light-theme polish</b>: Library category / family / sub-family palette rebuilt with proper light-vs-dark contrast steps (the previous sub-family pair was inverted), and the dark bands that appeared behind separator headers on light themes are gone — <code>gridContainer</code>, the sticky header and the grid viewport now follow <code>list.background</code>.</li>
+</ul>
+
 <h3>0.1.6 — Smarter Library, sharper Analyser</h3>
 <ul>
   <li><b>Multi-term Library search</b>: <code>"informative content"</code> now finds <code>--token-informative-highlight-content-hover</code>. Search splits on spaces/dashes/underscores, every term must match.</li>

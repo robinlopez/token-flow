@@ -2,6 +2,28 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/) — versionning [SemVer](https://semver.org/).
 
+## [0.1.7] — 2026-05-19
+
+### Added
+- **Scope configuration import / export** : Settings → Token Flow → Scopes now exposes *Import…* and *Export…* links above the scope list. Export writes every configured scope (name, root, sources, whitelist, analysis excludes) to a versioned JSON file. Import reads such a file and asks whether to **Replace** the current list or **Merge** it (case-insensitive name match — existing scopes get overwritten, new ones are appended). Closes [#12](https://github.com/robinlopez/token-flow/issues/12).
+- **Versioned config file** : the JSON carries a `version` field. Older plugin builds refuse files produced by a newer schema rather than silently dropping fields. Current schema version is `1`.
+- **Vue Single File Components (`.vue`) support** : tokens declared inside `<style>` and `<style lang="scss">` blocks of a Vue SFC are now indexed, surfaced in the Library, and counted in audit coverage. Hardcoded value detection, code completion, Alt+T alternatives and Go-to-declaration all operate inside the style blocks — and stay silent in `<template>` / `<script>` to avoid corrupting the surrounding HTML / JS. Implementation is text-based (no dependency on the Vue plugin), so it works identically in Community and Ultimate. Multiple `<style>` blocks per SFC are supported; `<style scoped>` and `<style module>` behave the same. `<style src="…">` blocks defer to the regular extension-based walker on the referenced file. Closes [#3](https://github.com/robinlopez/token-flow/issues/3).
+- **Library family / sub-family grouping** : inside each big category accordion (Color, Spacing, …), the Library can now insert a two-level hierarchy of headers — family (e.g. `HIGH`, `LOW`, `PRIMARY`) and sub-family (`SURFACE`, `CONTENT`, `STROKE`, …) — derived from the structure of token names alone. No hard-coded vocabulary: the algorithm strips the longest common prefix shared by tokens in a category, trims the trailing state segment, and buckets by what's left, so it adapts to any naming convention. Token rows indent under their header so the alignment reads like a tree, not a flat list. A new toolbar button (group-by icon next to the view-mode toggle) toggles the grouping; **off by default**, the preference persists per-project and lives in the panel rather than in Settings.
+- **Sticky category header in the Library** : when scrolling past a category, its header pins to the top of the viewport (with the same chevron behaviour as the in-list row) so the active context is always visible in long catalogues.
+- **Justified category bar** : category header is now laid out as `[chevron] TITLE … (count)` — title left-aligned, count badge right-aligned and tinted with the accent foreground so it no longer reads like a resolved token value.
+
+### Changed
+- **Variant tooltip — vertical layout** : the per-variant tooltip on token rows (Library, hover popup, inspection tooltips) used to render a horizontal HTML table that blew up width-wise as soon as a token had more than 2-3 variants. Replaced with a justified one-line-per-variant layout: variant label on the left, swatch / category glyph + resolved value right-aligned, themes grouped with discrete subheaders when multiple themes are present. Same data, easier to compare side-by-side.
+- **Hardcoded Values — tighter row layout** : rows now indent under their selector header (so the grouping reads as a small tree), the literal column is narrower (110 vs 140 px, recovers space for the suggestion combo), and the suggestion combo grows to 30 px tall so the selected value never has its descender clipped.
+- **Hardcoded Values — hide rows without a suggestion** : a new toolbar toggle (filter icon) suppresses literals that have no matching design token; broken references stay visible because they are actionable. **On by default**, persisted per project. The status line reports `… · N hidden` so it's obvious the filter is shrinking the view.
+- **Library — Token-kind filter syncs with file chips** : ticking / unticking a kind in the filter popup now flips every file chip of that kind in the strip below the search bar, and vice-versa (the last muted file of a kind also unticks the kind). The two filter surfaces no longer drift.
+- **Library — Grid view indent under family / sub-family headers** : card wraps inherit the same left padding as their heading label, with extra vertical spacing between families so blocks read as distinct sections instead of a single grid.
+- **Scope chip vertical alignment** : in the Library and Hardcoded Values toolbars, the `Scope: [Name] (?)` chip is now vertically centred against the action-toolbar buttons on its left.
+
+### Fixed
+- **Light-theme adaptation in the Library** : sub-family header foreground was previously inverted (`JBColor(light, dark)` was set as `JBColor(pale, dark)` — illegible in both themes); category / family / sub-family palette rebuilt with proper light-vs-dark contrast steps. The resolved-value text, scope label and filter-popup section headers now use the platform's adaptive muted foreground instead of the fixed `JBColor.GRAY` (which is `Gray._128` and never adapts).
+- **Light-theme dark bands behind Library category headers** : `gridContainer`, the sticky header panel and the grid scroll-pane viewport now follow `list.background`, so the section separators no longer paint a dark band over a cream container on light themes where `JPanel.background` and `List.background` diverge.
+
 ## [0.1.6] — 2026-05-18
 
 ### Added

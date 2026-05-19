@@ -3,6 +3,7 @@ package fr.fsh.tokendesigner.ui
 import com.intellij.icons.AllIcons
 import com.intellij.ui.JBColor
 import com.intellij.util.ui.JBUI
+import com.intellij.util.ui.UIUtil
 import fr.fsh.tokendesigner.model.DesignToken
 import fr.fsh.tokendesigner.model.TokenCategory
 import fr.fsh.tokendesigner.model.TokenKind
@@ -46,8 +47,12 @@ class TokenCellRenderer(
         font = font.deriveFont(font.size2D - 2f)
         border = JBUI.Borders.emptyLeft(6)
     }
+    // `JBColor.GRAY` is `Gray._128` and does not adapt between themes — it's
+    // borderline on light backgrounds. `UIUtil.getContextHelpForeground()`
+    // returns the platform's muted-secondary foreground which scales with the
+    // theme (darker on light, lighter on dark).
     private val valueLabel = JLabel().apply {
-        foreground = JBColor.GRAY
+        foreground = UIUtil.getContextHelpForeground()
         horizontalAlignment = SwingConstants.RIGHT
     }
     private val locateLabel = JLabel(AllIcons.General.Locate).apply {
@@ -116,7 +121,7 @@ class TokenCellRenderer(
         } else {
             panel.background = list.background
             nameLabel.foreground = list.foreground
-            valueLabel.foreground = JBColor.GRAY
+            valueLabel.foreground = UIUtil.getContextHelpForeground()
         }
         panel.isOpaque = true
         return panel

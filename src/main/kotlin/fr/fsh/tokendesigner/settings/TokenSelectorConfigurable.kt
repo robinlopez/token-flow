@@ -2,10 +2,14 @@ package fr.fsh.tokendesigner.settings
 
 import com.intellij.openapi.fileChooser.FileChooser
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory
+import com.intellij.openapi.fileChooser.FileChooserFactory
+import com.intellij.openapi.fileChooser.FileSaverDescriptor
 import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.guessProjectDir
+import com.intellij.openapi.ui.Messages
+import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.ui.HyperlinkLabel
 import com.intellij.ui.OnePixelSplitter
@@ -285,11 +289,114 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
             .setMoveDownAction { moveSelectedScope(+1) }
             .createPanel()
 
+        val importLink = HyperlinkLabel("Import…").apply {
+            toolTipText = "Load scopes from a JSON file (replace or merge with the current list)."
+            addHyperlinkListener { importScopesFromFile() }
+        }
+        val exportLink = HyperlinkLabel("Export…").apply {
+            toolTipText = "Save the current scopes to a JSON file you can share or back up."
+            addHyperlinkListener { exportScopesToFile() }
+        }
+        val headerRow = JPanel(BorderLayout()).apply {
+            border = JBUI.Borders.emptyBottom(4)
+            add(JBLabel("Scopes"), BorderLayout.WEST)
+            add(JPanel(FlowLayout(FlowLayout.RIGHT, JBUI.scale(8), 0)).apply {
+                isOpaque = false
+                add(importLink)
+                add(exportLink)
+            }, BorderLayout.EAST)
+        }
+
         return JPanel(BorderLayout()).apply {
             border = JBUI.Borders.emptyRight(8)
-            add(JBLabel("Scopes").apply { border = JBUI.Borders.emptyBottom(4) }, BorderLayout.NORTH)
+            add(headerRow, BorderLayout.NORTH)
             add(decorated, BorderLayout.CENTER)
         }
+    }
+
+    // ─── Import / Export ──────────────────────────────────────────────────
+
+    private fun exportScopesToFile() {
+        commitDetailToList()
+        val scopes = currentScopes()
+        if (scopes.isEmpty()) {
+            Messages.showWarningDialog(
+                project,
+                "There is no scope to export. Add one first.",
+                "Export Token Flow Config",
+            )
+            return
+        }
+        val descriptor = FileSaverDescriptor(
+            "Export Token Flow Config",
+            "Save scopes as a JSON file.",
+            "json",
+        )
+        val baseDir = project.guessProjectDir()
+        val saver = FileChooserFactory.getInstance().createSaveFileDialog(descriptor, project)
+        val wrapper = saver.save(baseDir, "token-flow-scopes.json") ?: return
+        val file = wrapper.file
+        try {
+            file.writeText(ScopeConfigIO.export(scopes))
+            VfsUtil.findFileByIoFile(file, true)
+        } catch (e: Exception) {
+            Messages.showErrorDialog(
+                project,
+                "Could not write ${file.name}: ${e.message ?: e.javaClass.simpleName}",
+                "Export Token Flow Config",
+            )
+        }
+    }
+
+    private fun importScopesFromFile() {
+        val descriptor = FileChooserDescriptorFactory.createSingleFileDescriptor("json")
+            .withTitle("Import Token Flow Config")
+            .withDescription("Pick a JSON file previously exported from Token Flow.")
+        FileChooser.chooseFile(descriptor, project, project.guessProjectDir()) { vf ->
+            val incoming = try {
+                ScopeConfigIO.import(String(vf.contentsToByteArray(), Charsets.UTF_8))
+            } catch (e: ScopeConfigIO.ImportException) {
+                Messages.showErrorDialog(project, e.message ?: "Invalid file.", "Import Token Flow Config")
+                return@chooseFile
+            } catch (e: Exception) {
+                Messages.showErrorDialog(
+                    project,
+                    "Could not read ${vf.name}: ${e.message ?: e.javaClass.simpleName}",
+                    "Import Token Flow Config",
+                )
+                return@chooseFile
+            }
+            applyImportedScopes(incoming, sourceName = vf.name)
+        }
+    }
+
+    private fun applyImportedScopes(incoming: List<Scope>, sourceName: String) {
+        commitDetailToList()
+        val current = currentScopes()
+        val mode = if (current.isEmpty()) {
+            0 // replace, no question needed
+        } else {
+            Messages.showDialog(
+                project,
+                "Found ${incoming.size} scope(s) in $sourceName.\n\n" +
+                    "Replace clears the current list. Merge keeps existing scopes and " +
+                    "overwrites only those whose name matches (case-insensitive).",
+                "Import Token Flow Config",
+                arrayOf("Replace", "Merge", "Cancel"),
+                0,
+                Messages.getQuestionIcon(),
+            )
+        }
+        val next = when (mode) {
+            0 -> incoming
+            1 -> mergeScopes(current, incoming)
+            else -> return
+        }
+        scopesListModel.clear()
+        next.forEach { scopesListModel.addElement(ScopeRow.from(it)) }
+        detailBoundIndex = -1
+        if (!scopesListModel.isEmpty) scopesList.selectedIndex = 0
+        showDetail(scopesList.selectedValue)
     }
 
     private fun wireScopeMaster() {

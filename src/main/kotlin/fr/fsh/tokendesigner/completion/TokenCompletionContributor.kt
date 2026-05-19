@@ -34,14 +34,24 @@ class TokenCompletionContributor : CompletionContributor() {
 
     override fun fillCompletionVariants(parameters: CompletionParameters, result: CompletionResultSet) {
         val virtualFile = parameters.originalFile.virtualFile ?: return
-        val ext = virtualFile.extension?.lowercase() ?: return
-        if (ext !in TARGET_EXTS) return
+        val rawExt = virtualFile.extension?.lowercase() ?: return
+        if (rawExt !in TARGET_EXTS) return
 
         val project = parameters.position.project
         val settings = TokenSelectorSettings.getInstance(project)
 
         val document = parameters.editor.document
         val offset = parameters.offset
+        // Vue: behave like the surrounding `<style>` block's effective lang;
+        // return early when the caret sits in `<template>` / `<script>`
+        // — completing tokens there makes no syntactic sense.
+        val ext = if (rawExt == "vue") {
+            fr.fsh.tokendesigner.scanner.VueStyleBlockExtractor
+                .effectiveStyleExtAt(document.charsSequence, offset)
+                ?: return
+        } else {
+            rawExt
+        }
         val lineNumber = document.getLineNumber(offset)
         val lineStart = document.getLineStartOffset(lineNumber)
         val lineText = document.charsSequence.subSequence(lineStart, offset).toString()
@@ -206,7 +216,7 @@ class TokenCompletionContributor : CompletionContributor() {
     private data class Context(val prefix: String, val kind: TokenKind)
 
     private companion object {
-        val TARGET_EXTS = setOf("scss", "sass", "css", "ts", "tsx", "js", "jsx", "mjs", "cjs")
+        val TARGET_EXTS = setOf("scss", "sass", "css", "vue", "ts", "tsx", "js", "jsx", "mjs", "cjs")
         val JS_EXTS = setOf("ts", "tsx", "js", "jsx", "mjs", "cjs")
         val CSS_VAR_PREFIX = Regex("var\\(\\s*--([a-zA-Z0-9_-]*)$")
         val SCSS_VAR_PREFIX = Regex("(?:^|[\\s,;:({\\[])\\$([a-zA-Z][a-zA-Z0-9_-]*)$")

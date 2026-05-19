@@ -346,6 +346,9 @@ object TokenAlternativesShower {
             TokenKind.JS_RUNTIME_FUNCTION,
         )
         "scss", "sass" -> setOf(TokenKind.SCSS_VARIABLE, TokenKind.CSS_CUSTOM_PROPERTY)
+        // Vue SFCs may carry either CSS or SCSS in their `<style>` blocks —
+        // accept both so Alt+T resolves declarations of either kind.
+        "vue" -> setOf(TokenKind.SCSS_VARIABLE, TokenKind.CSS_CUSTOM_PROPERTY)
         "css" -> setOf(TokenKind.CSS_CUSTOM_PROPERTY)
         else -> TokenKind.entries.toSet()
     }

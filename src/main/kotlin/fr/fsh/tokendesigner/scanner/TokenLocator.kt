@@ -310,5 +310,5 @@ object TokenLocator {
         c.isLetterOrDigit() || c == '_' || c == '-'
 
     /** File extensions where JS/TS-only detectors must be skipped. */
-    private val CSS_LIKE_EXTS = setOf("css", "scss", "sass")
+    private val CSS_LIKE_EXTS = setOf("css", "scss", "sass", "vue")
 }

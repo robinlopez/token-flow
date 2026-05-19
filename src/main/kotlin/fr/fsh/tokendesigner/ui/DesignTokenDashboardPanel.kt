@@ -6,6 +6,7 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.util.IconLoader
 import fr.fsh.tokendesigner.util.readAction
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.fileEditor.FileEditorManager
@@ -63,10 +64,66 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
         }
     }.apply {
         cellRenderer = PopupRowRenderer(showLocateProvider = { it == hoveredIndex })
-        fixedCellHeight = JBUI.scale(28)
+        // Variable row height: tokens at 28 px, but category / family /
+        // sub-family separators have their own shorter preferredSize so they
+        // read as section breaks rather than full rows.
+        fixedCellHeight = -1
         dragEnabled = true
         transferHandler = TokenTransferHandler()
         javax.swing.ToolTipManager.sharedInstance().registerComponent(this)
+    }
+
+    private val stickyHeaderRenderer = PopupRowRenderer.SeparatorRowComponent()
+    private val stickyHeaderPanel = JPanel(BorderLayout()).apply {
+        border = JBUI.Borders.customLineBottom(com.intellij.ui.JBColor.border())
+        add(stickyHeaderRenderer, BorderLayout.CENTER)
+        // Background follows `list.background` (set in rebuildModel) so the
+        // sticky header blends with the rows below it across every theme;
+        // the default JPanel bg can diverge from List.background on some
+        // light themes and produce a dark band at the top of the panel.
+        isOpaque = true
+        isVisible = false
+    }
+    /** groupKey of the category currently rendered in the sticky header, if any. */
+    private var stickyCategoryGroupKey: String? = null
+
+    /**
+     * Walks back from the top-most visible row to the nearest level-0 category
+     * separator and mirrors it in the column-header view. Hidden when no
+     * category sits above the viewport (e.g. truly empty list, or when the
+     * category's own header row is already pinned at y == 0).
+     */
+    private fun updateStickyHeader(viewport: javax.swing.JViewport) {
+        if (listModel.isEmpty) {
+            stickyHeaderPanel.isVisible = false
+            stickyCategoryGroupKey = null
+            return
+        }
+        val viewY = viewport.viewPosition.y
+        if (viewY <= 0) {
+            stickyHeaderPanel.isVisible = false
+            stickyCategoryGroupKey = null
+            return
+        }
+        val firstIdx = list.locationToIndex(java.awt.Point(0, viewY)).coerceAtLeast(0)
+        var found: SeparatorPopupRow? = null
+        for (i in firstIdx downTo 0) {
+            val row = listModel.get(i)
+            if (row is SeparatorPopupRow && row.level == 0) {
+                found = row
+                break
+            }
+        }
+        if (found == null) {
+            stickyHeaderPanel.isVisible = false
+            stickyCategoryGroupKey = null
+            return
+        }
+        stickyHeaderRenderer.configure(found, list.background, true)
+        stickyCategoryGroupKey = found.groupKey
+        stickyHeaderPanel.isVisible = true
+        stickyHeaderPanel.revalidate()
+        stickyHeaderPanel.repaint()
     }
 
     private val searchField = SearchTextField()
@@ -88,18 +145,47 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
     private val clearFiltersAction = ClearFiltersAction()
     
     private val scopeLabel = com.intellij.ui.components.JBLabel("Scope: All project").apply {
-        foreground = com.intellij.ui.JBColor.GRAY
+        foreground = com.intellij.util.ui.UIUtil.getContextHelpForeground()
         font = com.intellij.util.ui.JBFont.small()
     }
 
     private val gridContainer = JPanel().apply {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         border = JBUI.Borders.empty()
+        // Force the grid panel's background to track the JBList **at paint
+        // time** — separator headers reuse `list.background`, and the JPanel
+        // default LAF bg can diverge from List.background on light themes
+        // (producing dark bands behind family / sub-family headings). A
+        // snapshot `bg = list.background` here would freeze whichever value
+        // is current at construction; the dynamic JBColor below re-reads
+        // list.background on every repaint and follows live theme switches.
+        isOpaque = true
     }
     private val mainContentCards = CardLayout()
     private val mainContentPanel = JPanel(mainContentCards)
 
     init {
+        // Tie every Library surface to **Panel.background** rather than the
+        // LAF's `List.background`. Some themes (and the user's case in
+        // particular) intentionally diverge — panel = cream / light, list =
+        // editor-dark — so following `list.background` reproduced the dark
+        // band behind separator headers even after we made the lookup
+        // dynamic. Anchoring on Panel.background plus an explicit override of
+        // the JBList itself makes the whole panel honour the IDE theme as a
+        // single visual unit, irrespective of the editor colour scheme.
+        @Suppress("DEPRECATION")
+        val panelBg = com.intellij.ui.JBColor {
+            com.intellij.util.ui.UIUtil.getPanelBackground()
+        }
+        @Suppress("DEPRECATION")
+        val panelFg = com.intellij.ui.JBColor {
+            com.intellij.util.ui.UIUtil.getLabelForeground()
+        }
+        list.background = panelBg
+        list.foreground = panelFg
+        gridContainer.background = panelBg
+        stickyHeaderPanel.background = panelBg
+
         setupSearch()
         setupListInteractions()
         setupToolbar()
@@ -288,7 +374,14 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
                 add(scopeLabel)
                 add(ScopeUIUtils.createScopeHelpButton(project))
             }
-            add(scopeBox, BorderLayout.EAST)
+            // Center the scope chip vertically against the action toolbar
+            // (toolbar buttons are taller than a plain JLabel, so without this
+            // wrapper the text sits top-aligned).
+            val scopeCenter = JPanel(java.awt.GridBagLayout()).apply {
+                isOpaque = false
+                add(scopeBox)
+            }
+            add(scopeCenter, BorderLayout.EAST)
         }
         setToolbar(topToolbarRow)
     }
@@ -312,6 +405,35 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
         filterButton.isActive = excludedFamilies.isNotEmpty() || excludedKindGroups.isNotEmpty()
         this.filterButtonRef = filterButton
 
+        // `ModuleGroup` is a folder-with-stacked-items glyph — the closest
+        // built-in icon to the "group buckets of related things" idea this
+        // toggle expresses. Use the platform's disabled variant for OFF so the
+        // visual delta between states is unmistakable.
+        val subfamilyIconOn = AllIcons.Nodes.ModuleGroup
+        val subfamilyIconOff = IconLoader.getDisabledIcon(subfamilyIconOn)
+        val subfamilyBtn = RoundIconButton(
+            subfamilyIconOn,
+            "Group by sub-family (auto-detected from token names)",
+        ) {}
+        fun updateSubfamilyBtn() {
+            val on = TokenSelectorSettings.getInstance(project).librarySubfamilyGrouping
+            subfamilyBtn.isActive = on
+            subfamilyBtn.currentIcon = if (on) subfamilyIconOn else subfamilyIconOff
+            subfamilyBtn.toolTipText = if (on) {
+                "Sub-family grouping: ON — click to flatten categories."
+            } else {
+                "Sub-family grouping: OFF — click to group similar tokens inside each category."
+            }
+            subfamilyBtn.repaint()
+        }
+        subfamilyBtn.addActionListener {
+            val s = TokenSelectorSettings.getInstance(project)
+            s.librarySubfamilyGrouping = !s.librarySubfamilyGrouping
+            updateSubfamilyBtn()
+            rebuildModel()
+        }
+        updateSubfamilyBtn()
+
         val viewModeBtn = RoundIconButton(AllIcons.Actions.ListFiles, "View Mode") {}
         fun updateViewModeBtn() {
             val mode = TokenSelectorSettings.getInstance(project).dashboardViewMode
@@ -334,15 +456,22 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
 
         val actionsPanel = JPanel(FlowLayout(FlowLayout.RIGHT, JBUI.scale(6), 0)).apply {
             isOpaque = false
+            add(subfamilyBtn)
             add(viewModeBtn)
             add(filterButton)
         }
-        
-        // Use an invisible border to vertically align the search field and the buttons
+        // FlowLayout sits the buttons at the top of the row; the search field
+        // is ~4 px taller so they read as misaligned. Wrapping the actions in
+        // a GridBagLayout (which centers a single child both axes) pulls them
+        // to the search field's vertical midline.
+        val actionsCenter = JPanel(java.awt.GridBagLayout()).apply {
+            isOpaque = false
+            add(actionsPanel)
+        }
         val searchRow = JPanel(BorderLayout(JBUI.scale(4), 0)).apply {
             border = JBUI.Borders.empty(2, 0, 0, 0)
             add(searchField, BorderLayout.CENTER)
-            add(actionsPanel, BorderLayout.EAST)
+            add(actionsCenter, BorderLayout.EAST)
         }
         val north = JPanel(BorderLayout()).apply {
             border = JBUI.Borders.empty(4, 4, 0, 4)
@@ -350,10 +479,35 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
             add(filesScroll, BorderLayout.SOUTH)
         }
         
-        val scrollList = JBScrollPane(list).apply { border = null }
+        val scrollList = JBScrollPane(list).apply {
+            border = null
+            setColumnHeaderView(stickyHeaderPanel)
+        }
+        // Repaint the floating category header whenever the viewport moves or
+        // the model rebuilds. Click on it = toggle that category's collapse —
+        // mirrors the in-list chevron behaviour so the sticky header is fully
+        // interactive, not decorative.
+        scrollList.viewport.addChangeListener { updateStickyHeader(scrollList.viewport) }
+        stickyHeaderPanel.cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+        stickyHeaderPanel.addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) {
+                stickyCategoryGroupKey?.let { toggleCollapse(it) }
+            }
+        })
         val scrollGrid = JBScrollPane(gridContainer).apply {
             border = null
             horizontalScrollBarPolicy = JBScrollPane.HORIZONTAL_SCROLLBAR_NEVER
+            // Viewport mirrors the JBList dynamically (see the JBColor lazy
+            // bound in `init`) so the empty strip beside the grid follows
+            // theme switches instead of freezing on the value live at
+            // construction time.
+            viewport.isOpaque = true
+            // Same anchor as the JBList itself — Panel.background, not List.
+            @Suppress("DEPRECATION")
+            val viewportBg = com.intellij.ui.JBColor {
+                com.intellij.util.ui.UIUtil.getPanelBackground()
+            }
+            viewport.background = viewportBg
         }
         mainContentPanel.add(scrollList, "LIST")
         mainContentPanel.add(scrollGrid, "GRID")
@@ -428,7 +582,20 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
                 isSelected = path !in inactiveFiles
                 toolTipText = path
                 addActionListener {
-                    if (isSelected) inactiveFiles.remove(path) else inactiveFiles.add(path)
+                    val kind = kindOfFile(path)
+                    if (isSelected) {
+                        inactiveFiles.remove(path)
+                        // Re-checking a file implicitly re-enables its kind so
+                        // a user doesn't have to chase ghost state in the popup.
+                        if (kind != null) excludedKindGroups.remove(kind)
+                    } else {
+                        inactiveFiles.add(path)
+                        // Last file of its kind muted ⇒ uncheck the kind too
+                        // so the popup mirrors the strip without manual work.
+                        if (kind != null && filesOfKind(kind).all { it in inactiveFiles }) {
+                            excludedKindGroups.add(kind)
+                        }
+                    }
                     rebuildModel()
                 }
             }
@@ -465,35 +632,56 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
         listModel.clear()
         gridContainer.removeAll()
         
-        val grouped = RowGrouping.byCategory(filtered, collapsedCategories)
+        val subfamilyOn = TokenSelectorSettings.getInstance(project).librarySubfamilyGrouping
+        val grouped = RowGrouping.byCategory(filtered, collapsedCategories, subfamilyOn)
         grouped.forEach(listModel::addElement)
-        
+
         var currentWrap: JPanel? = null
+        var categoryCollapsed = false
         for (row in grouped) {
             when (row) {
                 is SeparatorPopupRow -> {
                     val header = PopupRowRenderer().getListCellRendererComponent(list, row, 0, false, false) as JComponent
                     header.maximumSize = Dimension(Int.MAX_VALUE, header.preferredSize.height)
                     header.alignmentX = java.awt.Component.LEFT_ALIGNMENT
-                    
-                    if (row.collapsible) {
-                        header.cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-                        header.addMouseListener(object : MouseAdapter() {
-                            override fun mouseClicked(e: MouseEvent) {
-                                toggleCollapse(row.groupKey)
-                            }
-                        })
-                    }
-                    gridContainer.add(header)
-                    
-                    if (!row.collapsed) {
-                        currentWrap = JPanel(CssGridLayout(JBUI.scale(180), JBUI.scale(90), JBUI.scale(12), JBUI.scale(12))).apply {
-                            border = JBUI.Borders.empty(4, 8, 12, 8)
-                            alignmentX = java.awt.Component.LEFT_ALIGNMENT
+
+                    if (row.level == 0) {
+                        // Category header: chevron toggles collapse, new grid wrap starts below.
+                        categoryCollapsed = row.collapsed
+                        if (row.collapsible) {
+                            header.cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                            header.addMouseListener(object : MouseAdapter() {
+                                override fun mouseClicked(e: MouseEvent) {
+                                    toggleCollapse(row.groupKey)
+                                }
+                            })
                         }
-                        gridContainer.add(currentWrap)
-                    } else {
-                        currentWrap = null
+                        gridContainer.add(header)
+                        currentWrap = if (!row.collapsed) {
+                            JPanel(CssGridLayout(JBUI.scale(180), JBUI.scale(90), JBUI.scale(12), JBUI.scale(12))).apply {
+                                border = JBUI.Borders.empty(4, 8, 12, 8)
+                                alignmentX = java.awt.Component.LEFT_ALIGNMENT
+                            }.also { gridContainer.add(it) }
+                        } else {
+                            null
+                        }
+                    } else if (!categoryCollapsed) {
+                        // Family (level 1) gets extra top spacing so successive
+                        // families read as distinct blocks; sub-family (level 2)
+                        // sits tight under its family. Card wraps indent left
+                        // to match the header label's left padding, so cards
+                        // line up under their heading instead of the chevron.
+                        val indentStep = JBUI.scale(PopupRowRenderer.INDENT_PX)
+                        val isFamily = row.level == 1
+                        if (isFamily) {
+                            gridContainer.add(Box.createVerticalStrut(JBUI.scale(8)))
+                        }
+                        gridContainer.add(header)
+                        val leftPad = JBUI.scale(8) + indentStep * row.level
+                        currentWrap = JPanel(CssGridLayout(JBUI.scale(180), JBUI.scale(90), JBUI.scale(12), JBUI.scale(12))).apply {
+                            border = JBUI.Borders.empty(if (isFamily) 2 else 0, leftPad, if (isFamily) 10 else 6, JBUI.scale(8))
+                            alignmentX = java.awt.Component.LEFT_ALIGNMENT
+                        }.also { gridContainer.add(it) }
                     }
                 }
                 is TokenPopupRow -> {
@@ -507,6 +695,9 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
         }
         gridContainer.revalidate()
         gridContainer.repaint()
+        // Sticky header tracks scroll position; rebuilding the model resets row
+        // indices so refresh it now to avoid pinning a stale category.
+        (list.parent as? javax.swing.JViewport)?.let { updateStickyHeader(it) }
     }
 
     /**
@@ -538,7 +729,7 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
         val kindCheckboxes = mutableListOf<Pair<TokenKindGroup, javax.swing.JCheckBox>>()
         content.add(javax.swing.JLabel("<html><b>Token kind</b></html>").apply {
             alignmentX = java.awt.Component.LEFT_ALIGNMENT
-            foreground = com.intellij.ui.JBColor.GRAY
+            foreground = com.intellij.util.ui.UIUtil.getContextHelpForeground()
             border = JBUI.Borders.empty(0, 0, 4, 0)
         })
         for ((kind, count) in kindCounts) {
@@ -547,8 +738,19 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
                 isSelected = kind !in excludedKindGroups
                 alignmentX = java.awt.Component.LEFT_ALIGNMENT
                 addActionListener {
-                    if (isSelected) excludedKindGroups.remove(kind)
-                    else excludedKindGroups.add(kind)
+                    val files = filesOfKind(kind)
+                    if (isSelected) {
+                        excludedKindGroups.remove(kind)
+                        inactiveFiles.removeAll(files.toSet())
+                    } else {
+                        excludedKindGroups.add(kind)
+                        inactiveFiles.addAll(files)
+                    }
+                    // Reflect the new state on the file-chip strip below the
+                    // search bar so the two filter surfaces stay in sync.
+                    files.forEach { path ->
+                        fileChips[path]?.isSelected = path !in inactiveFiles
+                    }
                     rebuildModel()
                 }
             }
@@ -560,7 +762,7 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
         content.add(javax.swing.Box.createVerticalStrut(JBUI.scale(8)))
         content.add(javax.swing.JLabel("<html><b>Families</b></html>").apply {
             alignmentX = java.awt.Component.LEFT_ALIGNMENT
-            foreground = com.intellij.ui.JBColor.GRAY
+            foreground = com.intellij.util.ui.UIUtil.getContextHelpForeground()
             border = JBUI.Borders.empty(0, 0, 2, 0)
         })
         val checkboxes = mutableListOf<Pair<String, javax.swing.JCheckBox>>()
@@ -568,7 +770,7 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
             val families = byGroup[group] ?: continue
             content.add(javax.swing.JLabel("<html><i>$group</i></html>").apply {
                 alignmentX = java.awt.Component.LEFT_ALIGNMENT
-                foreground = com.intellij.ui.JBColor.GRAY
+                foreground = com.intellij.util.ui.UIUtil.getContextHelpForeground()
                 border = JBUI.Borders.empty(6, 0, 2, 0)
             })
             for ((family, count) in families.toSortedMap()) {
@@ -616,6 +818,22 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
             .createPopup()
             .show(com.intellij.ui.awt.RelativePoint(invoker, java.awt.Point(0, invoker.height)))
     }
+
+    /**
+     * Maps a project file path to the [TokenKindGroup] of the tokens it
+     * contributes. In practice one file = one kind (SCSS → SCSS, .ts → JS),
+     * so the first matching token is enough.
+     */
+    private fun kindOfFile(path: String): TokenKindGroup? =
+        allTokens.firstOrNull { it.filePath == path }?.kindGroup()
+
+    /** All distinct file paths producing tokens of the given [kind]. */
+    private fun filesOfKind(kind: TokenKindGroup): List<String> =
+        allTokens.asSequence()
+            .filter { it.kindGroup() == kind }
+            .map { it.filePath }
+            .distinct()
+            .toList()
 
     private fun familyOf(token: DesignToken): String {
         val struct = TokenNameParser.parse(token.name)
