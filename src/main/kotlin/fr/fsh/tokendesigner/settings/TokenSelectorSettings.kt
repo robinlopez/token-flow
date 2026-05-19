@@ -91,6 +91,14 @@ class TokenSelectorSettings : PersistentStateComponent<TokenSelectorSettings.Sta
          */
         @JvmField var librarySubfamilyGrouping: Boolean = false
         /**
+         * When true, the Hardcoded Values panel hides rows that have no
+         * matching token suggestion. Default: ON — those rows are typically
+         * noise (a literal that just doesn't map to anything in the system),
+         * and surfacing only actionable rows is what users want most of the
+         * time. Toggled from the panel toolbar.
+         */
+        @JvmField var hardcodedHideUnmatched: Boolean = true
+        /**
          * When false (default), hardcoded values that are part of a variable
          * declaration (e.g. `$color: #fff`) are ignored by the inspection.
          * Useful since tokens must be defined somewhere!
@@ -156,6 +164,10 @@ class TokenSelectorSettings : PersistentStateComponent<TokenSelectorSettings.Sta
     var librarySubfamilyGrouping: Boolean
         get() = state.librarySubfamilyGrouping
         set(value) { state.librarySubfamilyGrouping = value }
+
+    var hardcodedHideUnmatched: Boolean
+        get() = state.hardcodedHideUnmatched
+        set(value) { state.hardcodedHideUnmatched = value }
 
     var inspectVariableDeclarations: Boolean
         get() = state.inspectVariableDeclarations

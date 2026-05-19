@@ -71,6 +71,8 @@ Supported formats: SCSS variables, CSS Custom Properties, SCSS Maps, TS/JS prese
   <li><b>Sticky category header</b>: scroll past a category and its header pins to the top of the Library viewport, with the same chevron behaviour as the in-list row.</li>
   <li><b>Justified category bar</b>: layout is now <code>[chevron] TITLE … (count)</code>, with the count badge tinted so it can't be mistaken for a resolved token value.</li>
   <li><b>Two-way kind / file-chip sync</b>: ticking a token-kind in the Library filter popup now flips every file chip of that kind in the strip below the search bar, and vice-versa — the two filter surfaces no longer drift.</li>
+  <li><b>Variant tooltip — vertical layout</b>: per-variant tooltips now render one line per variant (label left, swatch / glyph + value right) instead of a wide horizontal table that overflowed once a token had several variants. Multi-theme tokens get discrete theme subheaders.</li>
+  <li><b>Hardcoded Values — tighter rows &amp; hide-no-match filter</b>: rows nest under their selector header, the literal column is narrower, the suggestion combo is taller (no more clipped descenders), and a new toolbar toggle hides literals without any matching token (on by default — broken references stay visible because they're actionable).</li>
   <li><b>Light-theme polish</b>: Library category / family / sub-family palette rebuilt with proper light-vs-dark contrast steps (the previous sub-family pair was inverted), and the dark bands that appeared behind separator headers on light themes are gone — <code>gridContainer</code>, the sticky header and the grid viewport now follow <code>list.background</code>.</li>
 </ul>
 
