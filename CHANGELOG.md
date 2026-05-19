@@ -2,6 +2,12 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/) — versionning [SemVer](https://semver.org/).
 
+## [0.1.7] — 2026-05-19
+
+### Added
+- **Scope configuration import / export** : Settings → Token Flow → Scopes now exposes *Import…* and *Export…* links above the scope list. Export writes every configured scope (name, root, sources, whitelist, analysis excludes) to a versioned JSON file. Import reads such a file and asks whether to **Replace** the current list or **Merge** it (case-insensitive name match — existing scopes get overwritten, new ones are appended). Closes [#12](https://github.com/robinlopez/token-flow/issues/12).
+- **Versioned config file** : the JSON carries a `version` field. Older plugin builds refuse files produced by a newer schema rather than silently dropping fields. Current schema version is `1`.
+
 ## [0.1.6] — 2026-05-18
 
 ### Added

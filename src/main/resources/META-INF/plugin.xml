@@ -61,6 +61,13 @@ Supported formats: SCSS variables, CSS Custom Properties, SCSS Maps, TS/JS prese
     ]]></description>
 
     <change-notes><![CDATA[
+<h3>0.1.7 — Portable scope configuration</h3>
+<ul>
+  <li><b>Export Config</b>: Settings → Token Flow → Scopes now has an <i>Export…</i> link that writes the current scopes to a JSON file. Share it with the team, commit it next to the project, or keep it as a backup.</li>
+  <li><b>Import Config</b>: paired <i>Import…</i> link reads a JSON file produced by Export. The plugin asks whether to <b>Replace</b> the current scopes or <b>Merge</b> (existing scopes with the same name are overwritten, new ones are appended). Pending edits are persisted via Apply, so a teammate can preview the import before committing.</li>
+  <li><b>Versioned format</b>: the JSON file carries a schema version. Older Token Flow builds refuse files produced by a future schema instead of silently dropping fields.</li>
+</ul>
+
 <h3>0.1.6 — Smarter Library, sharper Analyser</h3>
 <ul>
   <li><b>Multi-term Library search</b>: <code>"informative content"</code> now finds <code>--token-informative-highlight-content-hover</code>. Search splits on spaces/dashes/underscores, every term must match.</li>
