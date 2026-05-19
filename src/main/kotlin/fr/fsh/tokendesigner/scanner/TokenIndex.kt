@@ -94,7 +94,7 @@ class TokenIndex(private val project: Project) : Disposable {
 
     companion object {
         private val TARGET_SUFFIXES = listOf(
-            ".scss", ".sass", ".css",
+            ".scss", ".sass", ".css", ".vue",
             ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
         )
 

@@ -291,7 +291,18 @@ class DesignSystemAnalyzer(private val project: Project) {
             } catch (_: Exception) { continue }
 
             val hits = LiteralFinder.findIn(text)
-            val filteredHits = hits.filter {
+            // Vue: confine literal & reference detection to `<style>` blocks
+            // — every other section is JS / HTML and would yield false hits
+            // (e.g. `var(--foo)` in a JS template string).
+            val styleRanges = if (vf.extension?.lowercase() == "vue") {
+                fr.fsh.tokendesigner.scanner.VueStyleBlockExtractor.styleRanges(text)
+            } else {
+                null
+            }
+            val rangedHits = if (styleRanges == null) hits else hits.filter { h ->
+                styleRanges.any { h.startOffset in it }
+            }
+            val filteredHits = rangedHits.filter {
                 it.kind != LiteralFinder.Kind.REFERENCE &&
                     it.text.lowercase() !in ignoredNames &&
                     !(it.isDeclaration && (!inspectVariableDeclarations || (it.declarationName != null && it.declarationName in tokenNames)))
@@ -300,7 +311,7 @@ class DesignSystemAnalyzer(private val project: Project) {
             literalsByFile[vf.path] = filteredHits
             literal += filteredHits.size
 
-            hits.filter { it.kind == LiteralFinder.Kind.REFERENCE }.forEach { hit ->
+            rangedHits.filter { it.kind == LiteralFinder.Kind.REFERENCE }.forEach { hit ->
                 val name = extractTokenName(hit.text) ?: return@forEach
                 tokenised++
                 referenced += name
@@ -532,7 +543,7 @@ class DesignSystemAnalyzer(private val project: Project) {
 
     companion object {
         private const val MIN_HARDCODED_CLUSTER = 2
-        private val COVERAGE_EXTS = listOf("scss", "sass", "css", "ts", "tsx", "js", "jsx")
+        private val COVERAGE_EXTS = listOf("scss", "sass", "css", "vue", "ts", "tsx", "js", "jsx")
         // Each pattern's group 1 captures the bare token name so we can fold
         // the references into a single `Set<String>` for unused-token detection.
         private val CSS_REF = Regex("var\\(\\s*--([A-Za-z_][A-Za-z0-9_-]*)(?:\\s*,.*)?\\)")

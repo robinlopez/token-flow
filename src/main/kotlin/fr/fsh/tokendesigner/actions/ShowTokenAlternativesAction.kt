@@ -23,8 +23,20 @@ class ShowTokenAlternativesAction : AnAction() {
         val caret = editor.caretModel.offset
 
         // 1) Token reference under the caret? (e.g. $var, --var)
-        val ext = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance()
-            .getFile(editor.document)?.extension
+        val vf = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance().getFile(editor.document)
+        val ext = vf?.extension
+        // Vue files: only run inside `<style>` blocks. Outside them the caret
+        // sits in HTML or JS, where suggesting a CSS / SCSS replacement would
+        // corrupt the surrounding syntax.
+        if (ext?.lowercase() == "vue" &&
+            fr.fsh.tokendesigner.scanner.VueStyleBlockExtractor
+                .effectiveStyleExtAt(editor.document.charsSequence, caret) == null
+        ) {
+            JBPopupFactory.getInstance()
+                .createMessage("Token Flow only operates inside the <style> blocks of a Vue SFC.")
+                .showCenteredInCurrentWindow(project)
+            return
+        }
         val tokenHit = TokenLocator.find(editor.document, caret, ext)
         if (tokenHit != null) {
             TokenAlternativesShower.show(project, editor, tokenHit)

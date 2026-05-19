@@ -175,7 +175,7 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
         val ext = file.extension?.lowercase()
         if (ext !in SUPPORTED_EXTS) {
             showEmpty(
-                "Hardcoded value detection runs on .scss / .sass / .css / " +
+                "Hardcoded value detection runs on .scss / .sass / .css / .vue / " +
                     ".ts / .tsx / .js / .jsx files.<br/>Active: ${file.name}"
             )
             return
@@ -221,6 +221,12 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
             fr.fsh.tokendesigner.model.TokenKind.SCSS_VARIABLE,
             fr.fsh.tokendesigner.model.TokenKind.CSS_CUSTOM_PROPERTY,
         )
+        // Vue SFCs can hold both `<style>` and `<style lang="scss">` blocks
+        // — accept the union so a single file may produce both kinds.
+        "vue" -> setOf(
+            fr.fsh.tokendesigner.model.TokenKind.SCSS_VARIABLE,
+            fr.fsh.tokendesigner.model.TokenKind.CSS_CUSTOM_PROPERTY,
+        )
         "css" -> setOf(fr.fsh.tokendesigner.model.TokenKind.CSS_CUSTOM_PROPERTY)
         else -> fr.fsh.tokendesigner.model.TokenKind.entries.toSet()
     }
@@ -228,12 +234,21 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
     private fun computeRows(tokens: List<DesignToken>, ignoredNames: Set<String>, text: String): List<HardcodedRow> {
         val valueIndex = TokenValueIndex(tokens)
         val out = mutableListOf<HardcodedRow>()
-        val isJs = currentFile?.extension?.lowercase() in JS_EXTS
+        val ext = currentFile?.extension?.lowercase()
+        val isJs = ext in JS_EXTS
         val settings = TokenSelectorSettings.getInstance(project)
         val inspectVariableDeclarations = settings.inspectVariableDeclarations
         val tokenNames = tokens.map { it.name }.toSet()
+        // Confine Vue scanning to its `<style>` blocks; literal hits in
+        // `<template>` or `<script>` would otherwise pollute the report.
+        val styleRanges: List<IntRange>? = if (ext == "vue") {
+            fr.fsh.tokendesigner.scanner.VueStyleBlockExtractor.styleRanges(text)
+        } else {
+            null
+        }
 
         for (hit in LiteralFinder.findIn(text)) {
+            if (styleRanges != null && styleRanges.none { hit.startOffset in it }) continue
             if (hit.isDeclaration && (!inspectVariableDeclarations || (hit.declarationName != null && hit.declarationName in tokenNames))) continue
             if (hit.kind == LiteralFinder.Kind.NUMBER && !isJs) continue
             if (isJs && hit.insidePartialString) continue
@@ -616,7 +631,7 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
 
     companion object {
         private val SUPPORTED_EXTS = setOf(
-            "scss", "sass", "css",
+            "scss", "sass", "css", "vue",
             "ts", "tsx", "js", "jsx", "mjs", "cjs",
         )
         private val JS_EXTS = setOf("ts", "tsx", "js", "jsx", "mjs", "cjs")

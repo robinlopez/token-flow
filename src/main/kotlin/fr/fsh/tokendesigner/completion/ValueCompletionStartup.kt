@@ -69,6 +69,15 @@ class ValueCompletionStartup : ProjectActivity {
         if (editor.isDisposed) return
 
         val offset = editor.caretModel.offset
+        // Same Vue guard as ValueCompletionTypedHandler — outside `<style>`
+        // blocks the popup mustn't fire.
+        val vf = FileDocumentManager.getInstance().getFile(document)
+        if (vf?.extension?.lowercase() == "vue" &&
+            fr.fsh.tokendesigner.scanner.VueStyleBlockExtractor
+                .effectiveStyleExtAt(document.charsSequence, offset) == null
+        ) {
+            return
+        }
         val lineNumber = document.getLineNumber(offset)
         val lineStart = document.getLineStartOffset(lineNumber)
         val lineText = document.charsSequence.subSequence(lineStart, offset).toString()
@@ -102,7 +111,7 @@ class ValueCompletionStartup : ProjectActivity {
     }
 
     private companion object {
-        val TARGET_EXTS = setOf("scss", "sass", "css", "ts", "tsx", "js", "jsx", "mjs", "cjs")
+        val TARGET_EXTS = setOf("scss", "sass", "css", "vue", "ts", "tsx", "js", "jsx", "mjs", "cjs")
         val VALUE_CONTEXT = Regex("""([a-zA-Z][a-zA-Z-]*)\s*:\s*([^;{}'"`()\n]*)$""")
         val CSS_VAR_PREFIX = Regex("var\\(\\s*--[a-zA-Z0-9_-]*$")
         val SCSS_VAR_PREFIX = Regex("(?:^|[\\s,;:({\\[])\\$[a-zA-Z][a-zA-Z0-9_-]*$")

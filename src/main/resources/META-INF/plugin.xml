@@ -61,8 +61,9 @@ Supported formats: SCSS variables, CSS Custom Properties, SCSS Maps, TS/JS prese
     ]]></description>
 
     <change-notes><![CDATA[
-<h3>0.1.7 — Portable scope configuration &amp; smarter Library</h3>
+<h3>0.1.7 — Portable scope configuration, smarter Library &amp; Vue SFCs</h3>
 <ul>
+  <li><b>Vue Single File Components (<code>.vue</code>)</b>: tokens declared in <code>&lt;style&gt;</code> and <code>&lt;style lang="scss"&gt;</code> blocks of a Vue SFC are now indexed, listed in the Library, counted in audit coverage, and benefit from hardcoded-value detection / completion / Alt+T / Go-to-declaration. Text-based implementation — no dependency on the Vue plugin — so it works on Community and Ultimate. Scanning is confined to inline style blocks, so <code>&lt;template&gt;</code> and <code>&lt;script&gt;</code> sections stay untouched.</li>
   <li><b>Export Config</b>: Settings → Token Flow → Scopes now has an <i>Export…</i> link that writes the current scopes to a JSON file. Share it with the team, commit it next to the project, or keep it as a backup.</li>
   <li><b>Import Config</b>: paired <i>Import…</i> link reads a JSON file produced by Export. The plugin asks whether to <b>Replace</b> the current scopes or <b>Merge</b> (existing scopes with the same name are overwritten, new ones are appended). Pending edits are persisted via Apply, so a teammate can preview the import before committing.</li>
   <li><b>Versioned format</b>: the JSON file carries a schema version. Older Token Flow builds refuse files produced by a future schema instead of silently dropping fields.</li>

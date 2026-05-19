@@ -12,6 +12,7 @@ import com.intellij.psi.PsiFile
 import fr.fsh.tokendesigner.model.TokenCategory
 import fr.fsh.tokendesigner.model.TokenKind
 import fr.fsh.tokendesigner.scanner.TokenIndex
+import fr.fsh.tokendesigner.scanner.VueStyleBlockExtractor
 import fr.fsh.tokendesigner.settings.ScopeResolver
 import fr.fsh.tokendesigner.settings.TokenSelectorSettings
 
@@ -59,8 +60,18 @@ class HardcodedValueInspection : LocalInspectionTool() {
         val problems = mutableListOf<ProblemDescriptor>()
 
         val isJs = ext in JS_EXTS
+        // Vue: literal scanning must be confined to `<style>` blocks so we
+        // never flag e.g. `var(--foo)` written in a JS template string inside
+        // `<script setup>` or in the `<template>` markup.
+        val styleRanges: List<IntRange>? = if (ext == "vue") {
+            VueStyleBlockExtractor.styleRanges(text).ifEmpty { return null }
+        } else {
+            null
+        }
         val settings = TokenSelectorSettings.getInstance(project)
         for (hit in LiteralFinder.findIn(text)) {
+            // Restrict Vue hits to their style block. Outside any block ⇒ skip.
+            if (styleRanges != null && styleRanges.none { hit.startOffset in it }) continue
             // By default, we don't flag hardcoded values that are part of a
             // variable declaration (e.g. `$color: #fff`) because tokens must
             // be defined somewhere!
@@ -134,7 +145,7 @@ class HardcodedValueInspection : LocalInspectionTool() {
 
     companion object {
         private val TARGET_EXTS = setOf(
-            "scss", "sass", "css",
+            "scss", "sass", "css", "vue",
             "ts", "tsx", "js", "jsx", "mjs", "cjs",
         )
         private val JS_EXTS = setOf("ts", "tsx", "js", "jsx", "mjs", "cjs")
