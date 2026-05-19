@@ -11,6 +11,15 @@ Format : [Keep a Changelog](https://keepachangelog.com/) — versionning [SemVer
 - **Sticky category header in the Library** : when scrolling past a category, its header pins to the top of the viewport (with the same chevron behaviour as the in-list row) so the active context is always visible in long catalogues.
 - **Justified category bar** : category header is now laid out as `[chevron] TITLE … (count)` — title left-aligned, count badge right-aligned and tinted with the accent foreground so it no longer reads like a resolved token value.
 
+### Changed
+- **Library — Token-kind filter syncs with file chips** : ticking / unticking a kind in the filter popup now flips every file chip of that kind in the strip below the search bar, and vice-versa (the last muted file of a kind also unticks the kind). The two filter surfaces no longer drift.
+- **Library — Grid view indent under family / sub-family headers** : card wraps inherit the same left padding as their heading label, with extra vertical spacing between families so blocks read as distinct sections instead of a single grid.
+- **Scope chip vertical alignment** : in the Library and Hardcoded Values toolbars, the `Scope: [Name] (?)` chip is now vertically centred against the action-toolbar buttons on its left.
+
+### Fixed
+- **Light-theme adaptation in the Library** : sub-family header foreground was previously inverted (`JBColor(light, dark)` was set as `JBColor(pale, dark)` — illegible in both themes); category / family / sub-family palette rebuilt with proper light-vs-dark contrast steps. The resolved-value text, scope label and filter-popup section headers now use the platform's adaptive muted foreground instead of the fixed `JBColor.GRAY` (which is `Gray._128` and never adapts).
+- **Light-theme dark bands behind Library category headers** : `gridContainer`, the sticky header panel and the grid scroll-pane viewport now follow `list.background`, so the section separators no longer paint a dark band over a cream container on light themes where `JPanel.background` and `List.background` diverge.
+
 ## [0.1.6] — 2026-05-18
 
 ### Added

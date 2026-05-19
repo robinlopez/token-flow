@@ -141,18 +141,22 @@ class PopupRowRenderer(
         /** Width of one indent step (px) shared between headers and token rows. */
         const val INDENT_PX = 16
 
-        // Header foregrounds chosen to step down in contrast as the level
-        // deepens. Category is the most prominent, sub-family the quietest —
-        // never as loud as the token names (full white in dark themes).
-        private val CATEGORY_FG = JBColor(java.awt.Color(0x4A4A4A), java.awt.Color(0xC9CDD2))
-        private val FAMILY_FG = JBColor(java.awt.Color(0x6B6B6B), java.awt.Color(0xA0A6AC))
-        private val SUBFAMILY_FG = JBColor(java.awt.Color(0x9A9A9A), java.awt.Color(0x787E84))
-        // Count tint = accent foreground used elsewhere for badges (variant
-        // counter, helper ƒ glyph). Visually distinct from the resolved-value
-        // gray so users don't read it as a token value.
+        // Header foregrounds chosen so the contrast steps down as the level
+        // deepens, **independently in each theme**. In light themes the text
+        // must be DARK on white; in dark themes the text must be BRIGHT on
+        // near-black — flipping the convention silently makes the level-2
+        // header invisible on whichever theme is wrong (the previous
+        // sub-family palette was inverted, hence the rewrite).
+        private val CATEGORY_FG = JBColor(java.awt.Color(0x2D2D2D), java.awt.Color(0xCFD3D9))
+        private val FAMILY_FG = JBColor(java.awt.Color(0x5C5C5C), java.awt.Color(0xA0A6AC))
+        private val SUBFAMILY_FG = JBColor(java.awt.Color(0x7E7E7E), java.awt.Color(0x8B9097))
+        // Count tint: accent foreground (same family as the variant / ƒ badges
+        // in TokenCellRenderer) so a bare number can't be mistaken for a
+        // resolved token value, with a dimmer light-theme purple so it
+        // doesn't scream on white backgrounds.
         private val COUNT_FG = JBColor.namedColor(
             "Plugins.tagForeground",
-            JBColor(java.awt.Color(0x8B5CF6), java.awt.Color(0xC4B5FD)),
+            JBColor(java.awt.Color(0x6D49C2), java.awt.Color(0xC4B5FD)),
         )
     }
 }

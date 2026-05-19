@@ -69,11 +69,11 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
     private val emptyState = JBLabel().apply {
         horizontalAlignment = SwingConstants.CENTER
         verticalAlignment = SwingConstants.CENTER
-        foreground = JBColor.GRAY
+        foreground = com.intellij.util.ui.UIUtil.getContextHelpForeground()
     }
     private val statusLabel = JBLabel(" ").apply {
         border = JBUI.Borders.empty(6, 8)
-        foreground = JBColor.GRAY
+        foreground = com.intellij.util.ui.UIUtil.getContextHelpForeground()
     }
     private val centerCard = JPanel(BorderLayout())
     private val scroll = JBScrollPane(rowsContainer).apply {
@@ -90,7 +90,7 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
     @Volatile private var currentFile: VirtualFile? = null
 
     private val scopeLabel = JBLabel("Scope: None").apply {
-        foreground = JBColor.GRAY
+        foreground = com.intellij.util.ui.UIUtil.getContextHelpForeground()
         font = com.intellij.util.ui.JBFont.small()
     }
 
@@ -129,7 +129,13 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
                 add(scopeLabel)
                 add(ScopeUIUtils.createScopeHelpButton(project))
             }
-            add(scopeBox, BorderLayout.EAST)
+            // GridBagLayout vertically centres its single child — keeps the
+            // scope chip aligned with the action-toolbar buttons on its left.
+            val scopeCenter = JPanel(java.awt.GridBagLayout()).apply {
+                isOpaque = false
+                add(scopeBox)
+            }
+            add(scopeCenter, BorderLayout.EAST)
         }
         setToolbar(topToolbarRow)
     }
@@ -426,7 +432,7 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
                 if (collapsed) AllIcons.General.ArrowRight else AllIcons.General.ArrowDown,
             ).apply { border = JBUI.Borders.emptyRight(6) }
             val text = JBLabel("${label.uppercase()} · $count").apply {
-                foreground = JBColor.GRAY
+                foreground = com.intellij.util.ui.UIUtil.getContextHelpForeground()
                 font = font.deriveFont(font.size2D - 1f).deriveFont(java.awt.Font.BOLD)
             }
             val left = JPanel(java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0)).apply {
@@ -547,7 +553,7 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
                 swatch.glyph = "?"
                 swatch.toolTipText = "No matching token"
                 val label = JBLabel("(no matching token)").apply {
-                    foreground = JBColor.GRAY
+                    foreground = com.intellij.util.ui.UIUtil.getContextHelpForeground()
                     font = font.deriveFont(java.awt.Font.ITALIC)
                 }
                 return swatch to label

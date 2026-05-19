@@ -77,6 +77,11 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
     private val stickyHeaderPanel = JPanel(BorderLayout()).apply {
         border = JBUI.Borders.customLineBottom(com.intellij.ui.JBColor.border())
         add(stickyHeaderRenderer, BorderLayout.CENTER)
+        // Background follows `list.background` (set in rebuildModel) so the
+        // sticky header blends with the rows below it across every theme;
+        // the default JPanel bg can diverge from List.background on some
+        // light themes and produce a dark band at the top of the panel.
+        isOpaque = true
         isVisible = false
     }
     /** groupKey of the category currently rendered in the sticky header, if any. */
@@ -140,13 +145,19 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
     private val clearFiltersAction = ClearFiltersAction()
     
     private val scopeLabel = com.intellij.ui.components.JBLabel("Scope: All project").apply {
-        foreground = com.intellij.ui.JBColor.GRAY
+        foreground = com.intellij.util.ui.UIUtil.getContextHelpForeground()
         font = com.intellij.util.ui.JBFont.small()
     }
 
     private val gridContainer = JPanel().apply {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         border = JBUI.Borders.empty()
+        // Force the grid panel's background to match the JBList — separator
+        // headers reuse `list.background`, and on light themes the JPanel
+        // default and List.background diverge (panel = cream, list = dark)
+        // which produced opaque dark bands behind the family / sub-family
+        // headings in Grid View.
+        isOpaque = true
     }
     private val mainContentCards = CardLayout()
     private val mainContentPanel = JPanel(mainContentCards)
@@ -340,7 +351,14 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
                 add(scopeLabel)
                 add(ScopeUIUtils.createScopeHelpButton(project))
             }
-            add(scopeBox, BorderLayout.EAST)
+            // Center the scope chip vertically against the action toolbar
+            // (toolbar buttons are taller than a plain JLabel, so without this
+            // wrapper the text sits top-aligned).
+            val scopeCenter = JPanel(java.awt.GridBagLayout()).apply {
+                isOpaque = false
+                add(scopeBox)
+            }
+            add(scopeCenter, BorderLayout.EAST)
         }
         setToolbar(topToolbarRow)
     }
@@ -456,6 +474,12 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
         val scrollGrid = JBScrollPane(gridContainer).apply {
             border = null
             horizontalScrollBarPolicy = JBScrollPane.HORIZONTAL_SCROLLBAR_NEVER
+            // Match the viewport background to the list — otherwise the empty
+            // strip beside the grid (when content is narrower than viewport)
+            // falls back to the LAF panel bg, which on light themes is
+            // visibly different from List.background.
+            viewport.isOpaque = true
+            viewport.background = list.background
         }
         mainContentPanel.add(scrollList, "LIST")
         mainContentPanel.add(scrollGrid, "GRID")
@@ -530,7 +554,20 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
                 isSelected = path !in inactiveFiles
                 toolTipText = path
                 addActionListener {
-                    if (isSelected) inactiveFiles.remove(path) else inactiveFiles.add(path)
+                    val kind = kindOfFile(path)
+                    if (isSelected) {
+                        inactiveFiles.remove(path)
+                        // Re-checking a file implicitly re-enables its kind so
+                        // a user doesn't have to chase ghost state in the popup.
+                        if (kind != null) excludedKindGroups.remove(kind)
+                    } else {
+                        inactiveFiles.add(path)
+                        // Last file of its kind muted ⇒ uncheck the kind too
+                        // so the popup mirrors the strip without manual work.
+                        if (kind != null && filesOfKind(kind).all { it in inactiveFiles }) {
+                            excludedKindGroups.add(kind)
+                        }
+                    }
                     rebuildModel()
                 }
             }
@@ -566,6 +603,11 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
         filterButtonRef?.isActive = excludedFamilies.isNotEmpty() || excludedKindGroups.isNotEmpty()
         listModel.clear()
         gridContainer.removeAll()
+        // Re-sync container backgrounds with the (theme-aware) list bg so
+        // separator headers — which paint list.background — don't draw a
+        // dark band on top of a cream / light grid container.
+        gridContainer.background = list.background
+        stickyHeaderPanel.background = list.background
         
         val subfamilyOn = TokenSelectorSettings.getInstance(project).librarySubfamilyGrouping
         val grouped = RowGrouping.byCategory(filtered, collapsedCategories, subfamilyOn)
@@ -601,11 +643,20 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
                             null
                         }
                     } else if (!categoryCollapsed) {
-                        // Sub-family header: append a quiet label, then a fresh
-                        // card wrap so the next batch of cards flows under it.
+                        // Family (level 1) gets extra top spacing so successive
+                        // families read as distinct blocks; sub-family (level 2)
+                        // sits tight under its family. Card wraps indent left
+                        // to match the header label's left padding, so cards
+                        // line up under their heading instead of the chevron.
+                        val indentStep = JBUI.scale(PopupRowRenderer.INDENT_PX)
+                        val isFamily = row.level == 1
+                        if (isFamily) {
+                            gridContainer.add(Box.createVerticalStrut(JBUI.scale(8)))
+                        }
                         gridContainer.add(header)
+                        val leftPad = JBUI.scale(8) + indentStep * row.level
                         currentWrap = JPanel(CssGridLayout(JBUI.scale(180), JBUI.scale(90), JBUI.scale(12), JBUI.scale(12))).apply {
-                            border = JBUI.Borders.empty(0, 8, 8, 8)
+                            border = JBUI.Borders.empty(if (isFamily) 2 else 0, leftPad, if (isFamily) 10 else 6, JBUI.scale(8))
                             alignmentX = java.awt.Component.LEFT_ALIGNMENT
                         }.also { gridContainer.add(it) }
                     }
@@ -655,7 +706,7 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
         val kindCheckboxes = mutableListOf<Pair<TokenKindGroup, javax.swing.JCheckBox>>()
         content.add(javax.swing.JLabel("<html><b>Token kind</b></html>").apply {
             alignmentX = java.awt.Component.LEFT_ALIGNMENT
-            foreground = com.intellij.ui.JBColor.GRAY
+            foreground = com.intellij.util.ui.UIUtil.getContextHelpForeground()
             border = JBUI.Borders.empty(0, 0, 4, 0)
         })
         for ((kind, count) in kindCounts) {
@@ -664,8 +715,19 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
                 isSelected = kind !in excludedKindGroups
                 alignmentX = java.awt.Component.LEFT_ALIGNMENT
                 addActionListener {
-                    if (isSelected) excludedKindGroups.remove(kind)
-                    else excludedKindGroups.add(kind)
+                    val files = filesOfKind(kind)
+                    if (isSelected) {
+                        excludedKindGroups.remove(kind)
+                        inactiveFiles.removeAll(files.toSet())
+                    } else {
+                        excludedKindGroups.add(kind)
+                        inactiveFiles.addAll(files)
+                    }
+                    // Reflect the new state on the file-chip strip below the
+                    // search bar so the two filter surfaces stay in sync.
+                    files.forEach { path ->
+                        fileChips[path]?.isSelected = path !in inactiveFiles
+                    }
                     rebuildModel()
                 }
             }
@@ -677,7 +739,7 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
         content.add(javax.swing.Box.createVerticalStrut(JBUI.scale(8)))
         content.add(javax.swing.JLabel("<html><b>Families</b></html>").apply {
             alignmentX = java.awt.Component.LEFT_ALIGNMENT
-            foreground = com.intellij.ui.JBColor.GRAY
+            foreground = com.intellij.util.ui.UIUtil.getContextHelpForeground()
             border = JBUI.Borders.empty(0, 0, 2, 0)
         })
         val checkboxes = mutableListOf<Pair<String, javax.swing.JCheckBox>>()
@@ -685,7 +747,7 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
             val families = byGroup[group] ?: continue
             content.add(javax.swing.JLabel("<html><i>$group</i></html>").apply {
                 alignmentX = java.awt.Component.LEFT_ALIGNMENT
-                foreground = com.intellij.ui.JBColor.GRAY
+                foreground = com.intellij.util.ui.UIUtil.getContextHelpForeground()
                 border = JBUI.Borders.empty(6, 0, 2, 0)
             })
             for ((family, count) in families.toSortedMap()) {
@@ -733,6 +795,22 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
             .createPopup()
             .show(com.intellij.ui.awt.RelativePoint(invoker, java.awt.Point(0, invoker.height)))
     }
+
+    /**
+     * Maps a project file path to the [TokenKindGroup] of the tokens it
+     * contributes. In practice one file = one kind (SCSS → SCSS, .ts → JS),
+     * so the first matching token is enough.
+     */
+    private fun kindOfFile(path: String): TokenKindGroup? =
+        allTokens.firstOrNull { it.filePath == path }?.kindGroup()
+
+    /** All distinct file paths producing tokens of the given [kind]. */
+    private fun filesOfKind(kind: TokenKindGroup): List<String> =
+        allTokens.asSequence()
+            .filter { it.kindGroup() == kind }
+            .map { it.filePath }
+            .distinct()
+            .toList()
 
     private fun familyOf(token: DesignToken): String {
         val struct = TokenNameParser.parse(token.name)
