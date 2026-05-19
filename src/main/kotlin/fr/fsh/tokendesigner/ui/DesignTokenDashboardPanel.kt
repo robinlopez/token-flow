@@ -152,17 +152,31 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
     private val gridContainer = JPanel().apply {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         border = JBUI.Borders.empty()
-        // Force the grid panel's background to match the JBList — separator
-        // headers reuse `list.background`, and on light themes the JPanel
-        // default and List.background diverge (panel = cream, list = dark)
-        // which produced opaque dark bands behind the family / sub-family
-        // headings in Grid View.
+        // Force the grid panel's background to track the JBList **at paint
+        // time** — separator headers reuse `list.background`, and the JPanel
+        // default LAF bg can diverge from List.background on light themes
+        // (producing dark bands behind family / sub-family headings). A
+        // snapshot `bg = list.background` here would freeze whichever value
+        // is current at construction; the dynamic JBColor below re-reads
+        // list.background on every repaint and follows live theme switches.
         isOpaque = true
     }
     private val mainContentCards = CardLayout()
     private val mainContentPanel = JPanel(mainContentCards)
 
     init {
+        // Dynamic backgrounds that follow the JBList at paint time. A static
+        // snapshot would freeze whichever theme value happened to be live at
+        // initialisation, leaving stale dark bands behind separator headers
+        // after the user switches to a light theme mid-session. The `JBColor`
+        // producer constructor is officially deprecated in favour of newer
+        // helpers added in 2024.3, but the suppressed signature is still the
+        // canonical way to do this on our `sinceBuild = 242` baseline.
+        @Suppress("DEPRECATION")
+        val listBgProvider = com.intellij.ui.JBColor { list.background }
+        gridContainer.background = listBgProvider
+        stickyHeaderPanel.background = listBgProvider
+
         setupSearch()
         setupListInteractions()
         setupToolbar()
@@ -474,12 +488,14 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
         val scrollGrid = JBScrollPane(gridContainer).apply {
             border = null
             horizontalScrollBarPolicy = JBScrollPane.HORIZONTAL_SCROLLBAR_NEVER
-            // Match the viewport background to the list — otherwise the empty
-            // strip beside the grid (when content is narrower than viewport)
-            // falls back to the LAF panel bg, which on light themes is
-            // visibly different from List.background.
+            // Viewport mirrors the JBList dynamically (see the JBColor lazy
+            // bound in `init`) so the empty strip beside the grid follows
+            // theme switches instead of freezing on the value live at
+            // construction time.
             viewport.isOpaque = true
-            viewport.background = list.background
+            @Suppress("DEPRECATION")
+            val viewportBg = com.intellij.ui.JBColor { list.background }
+            viewport.background = viewportBg
         }
         mainContentPanel.add(scrollList, "LIST")
         mainContentPanel.add(scrollGrid, "GRID")
@@ -603,11 +619,6 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
         filterButtonRef?.isActive = excludedFamilies.isNotEmpty() || excludedKindGroups.isNotEmpty()
         listModel.clear()
         gridContainer.removeAll()
-        // Re-sync container backgrounds with the (theme-aware) list bg so
-        // separator headers — which paint list.background — don't draw a
-        // dark band on top of a cream / light grid container.
-        gridContainer.background = list.background
-        stickyHeaderPanel.background = list.background
         
         val subfamilyOn = TokenSelectorSettings.getInstance(project).librarySubfamilyGrouping
         val grouped = RowGrouping.byCategory(filtered, collapsedCategories, subfamilyOn)
