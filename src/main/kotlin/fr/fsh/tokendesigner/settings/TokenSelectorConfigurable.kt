@@ -327,10 +327,15 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
             )
             return
         }
+        // The vararg-extensions ctor is deprecated on 2024.2+. The two-arg
+        // form is the non-deprecated baseline; we still seed the default
+        // filename below with a `.json` suffix so the save dialog opens with
+        // the right extension pre-filled. `withExtensionFilter` would be the
+        // ideal restriction but it only lands in 2024.3, after our
+        // `sinceBuild` floor.
         val descriptor = FileSaverDescriptor(
             "Export Token Flow Config",
             "Save scopes as a JSON file.",
-            "json",
         )
         val baseDir = project.guessProjectDir()
         val saver = FileChooserFactory.getInstance().createSaveFileDialog(descriptor, project)

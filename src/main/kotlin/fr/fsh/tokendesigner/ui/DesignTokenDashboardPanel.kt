@@ -173,12 +173,13 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
         // dynamic. Anchoring on Panel.background plus an explicit override of
         // the JBList itself makes the whole panel honour the IDE theme as a
         // single visual unit, irrespective of the editor colour scheme.
-        @Suppress("DEPRECATION")
-        val panelBg = com.intellij.ui.JBColor {
+        // `JBColor.lazy(Supplier<Color>)` is the non-deprecated factory
+        // replacement for the `JBColor(NotNullProducer)` ctor flagged by the
+        // plugin verifier.
+        val panelBg = com.intellij.ui.JBColor.lazy {
             com.intellij.util.ui.UIUtil.getPanelBackground()
         }
-        @Suppress("DEPRECATION")
-        val panelFg = com.intellij.ui.JBColor {
+        val panelFg = com.intellij.ui.JBColor.lazy {
             com.intellij.util.ui.UIUtil.getLabelForeground()
         }
         list.background = panelBg
@@ -502,12 +503,11 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
             // theme switches instead of freezing on the value live at
             // construction time.
             viewport.isOpaque = true
-            // Same anchor as the JBList itself — Panel.background, not List.
-            @Suppress("DEPRECATION")
-            val viewportBg = com.intellij.ui.JBColor {
+            // Same anchor as the JBList — Panel.background, not List —
+            // through the non-deprecated `JBColor.lazy` factory.
+            viewport.background = com.intellij.ui.JBColor.lazy {
                 com.intellij.util.ui.UIUtil.getPanelBackground()
             }
-            viewport.background = viewportBg
         }
         mainContentPanel.add(scrollList, "LIST")
         mainContentPanel.add(scrollGrid, "GRID")
