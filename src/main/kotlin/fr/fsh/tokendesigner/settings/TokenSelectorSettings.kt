@@ -84,6 +84,13 @@ class TokenSelectorSettings : PersistentStateComponent<TokenSelectorSettings.Sta
         /** Dashboard view mode - "LIST" or "GRID" */
         @JvmField var dashboardViewMode: String = "LIST"
         /**
+         * When true, the Library panel inserts family / sub-family headers
+         * inside each big category, derived from the structure of token names.
+         * Off by default — naming conventions vary widely, so let the user
+         * opt in from the panel toolbar rather than impose a layout.
+         */
+        @JvmField var librarySubfamilyGrouping: Boolean = false
+        /**
          * When false (default), hardcoded values that are part of a variable
          * declaration (e.g. `$color: #fff`) are ignored by the inspection.
          * Useful since tokens must be defined somewhere!
@@ -145,6 +152,10 @@ class TokenSelectorSettings : PersistentStateComponent<TokenSelectorSettings.Sta
     var dashboardViewMode: String
         get() = state.dashboardViewMode
         set(value) { state.dashboardViewMode = value }
+
+    var librarySubfamilyGrouping: Boolean
+        get() = state.librarySubfamilyGrouping
+        set(value) { state.librarySubfamilyGrouping = value }
 
     var inspectVariableDeclarations: Boolean
         get() = state.inspectVariableDeclarations

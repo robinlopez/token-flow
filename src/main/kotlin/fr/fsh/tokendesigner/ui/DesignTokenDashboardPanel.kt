@@ -6,6 +6,7 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.util.IconLoader
 import fr.fsh.tokendesigner.util.readAction
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.fileEditor.FileEditorManager
@@ -63,10 +64,61 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
         }
     }.apply {
         cellRenderer = PopupRowRenderer(showLocateProvider = { it == hoveredIndex })
-        fixedCellHeight = JBUI.scale(28)
+        // Variable row height: tokens at 28 px, but category / family /
+        // sub-family separators have their own shorter preferredSize so they
+        // read as section breaks rather than full rows.
+        fixedCellHeight = -1
         dragEnabled = true
         transferHandler = TokenTransferHandler()
         javax.swing.ToolTipManager.sharedInstance().registerComponent(this)
+    }
+
+    private val stickyHeaderRenderer = PopupRowRenderer.SeparatorRowComponent()
+    private val stickyHeaderPanel = JPanel(BorderLayout()).apply {
+        border = JBUI.Borders.customLineBottom(com.intellij.ui.JBColor.border())
+        add(stickyHeaderRenderer, BorderLayout.CENTER)
+        isVisible = false
+    }
+    /** groupKey of the category currently rendered in the sticky header, if any. */
+    private var stickyCategoryGroupKey: String? = null
+
+    /**
+     * Walks back from the top-most visible row to the nearest level-0 category
+     * separator and mirrors it in the column-header view. Hidden when no
+     * category sits above the viewport (e.g. truly empty list, or when the
+     * category's own header row is already pinned at y == 0).
+     */
+    private fun updateStickyHeader(viewport: javax.swing.JViewport) {
+        if (listModel.isEmpty) {
+            stickyHeaderPanel.isVisible = false
+            stickyCategoryGroupKey = null
+            return
+        }
+        val viewY = viewport.viewPosition.y
+        if (viewY <= 0) {
+            stickyHeaderPanel.isVisible = false
+            stickyCategoryGroupKey = null
+            return
+        }
+        val firstIdx = list.locationToIndex(java.awt.Point(0, viewY)).coerceAtLeast(0)
+        var found: SeparatorPopupRow? = null
+        for (i in firstIdx downTo 0) {
+            val row = listModel.get(i)
+            if (row is SeparatorPopupRow && row.level == 0) {
+                found = row
+                break
+            }
+        }
+        if (found == null) {
+            stickyHeaderPanel.isVisible = false
+            stickyCategoryGroupKey = null
+            return
+        }
+        stickyHeaderRenderer.configure(found, list.background, true)
+        stickyCategoryGroupKey = found.groupKey
+        stickyHeaderPanel.isVisible = true
+        stickyHeaderPanel.revalidate()
+        stickyHeaderPanel.repaint()
     }
 
     private val searchField = SearchTextField()
@@ -312,6 +364,35 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
         filterButton.isActive = excludedFamilies.isNotEmpty() || excludedKindGroups.isNotEmpty()
         this.filterButtonRef = filterButton
 
+        // `ModuleGroup` is a folder-with-stacked-items glyph — the closest
+        // built-in icon to the "group buckets of related things" idea this
+        // toggle expresses. Use the platform's disabled variant for OFF so the
+        // visual delta between states is unmistakable.
+        val subfamilyIconOn = AllIcons.Nodes.ModuleGroup
+        val subfamilyIconOff = IconLoader.getDisabledIcon(subfamilyIconOn)
+        val subfamilyBtn = RoundIconButton(
+            subfamilyIconOn,
+            "Group by sub-family (auto-detected from token names)",
+        ) {}
+        fun updateSubfamilyBtn() {
+            val on = TokenSelectorSettings.getInstance(project).librarySubfamilyGrouping
+            subfamilyBtn.isActive = on
+            subfamilyBtn.currentIcon = if (on) subfamilyIconOn else subfamilyIconOff
+            subfamilyBtn.toolTipText = if (on) {
+                "Sub-family grouping: ON — click to flatten categories."
+            } else {
+                "Sub-family grouping: OFF — click to group similar tokens inside each category."
+            }
+            subfamilyBtn.repaint()
+        }
+        subfamilyBtn.addActionListener {
+            val s = TokenSelectorSettings.getInstance(project)
+            s.librarySubfamilyGrouping = !s.librarySubfamilyGrouping
+            updateSubfamilyBtn()
+            rebuildModel()
+        }
+        updateSubfamilyBtn()
+
         val viewModeBtn = RoundIconButton(AllIcons.Actions.ListFiles, "View Mode") {}
         fun updateViewModeBtn() {
             val mode = TokenSelectorSettings.getInstance(project).dashboardViewMode
@@ -334,15 +415,22 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
 
         val actionsPanel = JPanel(FlowLayout(FlowLayout.RIGHT, JBUI.scale(6), 0)).apply {
             isOpaque = false
+            add(subfamilyBtn)
             add(viewModeBtn)
             add(filterButton)
         }
-        
-        // Use an invisible border to vertically align the search field and the buttons
+        // FlowLayout sits the buttons at the top of the row; the search field
+        // is ~4 px taller so they read as misaligned. Wrapping the actions in
+        // a GridBagLayout (which centers a single child both axes) pulls them
+        // to the search field's vertical midline.
+        val actionsCenter = JPanel(java.awt.GridBagLayout()).apply {
+            isOpaque = false
+            add(actionsPanel)
+        }
         val searchRow = JPanel(BorderLayout(JBUI.scale(4), 0)).apply {
             border = JBUI.Borders.empty(2, 0, 0, 0)
             add(searchField, BorderLayout.CENTER)
-            add(actionsPanel, BorderLayout.EAST)
+            add(actionsCenter, BorderLayout.EAST)
         }
         val north = JPanel(BorderLayout()).apply {
             border = JBUI.Borders.empty(4, 4, 0, 4)
@@ -350,7 +438,21 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
             add(filesScroll, BorderLayout.SOUTH)
         }
         
-        val scrollList = JBScrollPane(list).apply { border = null }
+        val scrollList = JBScrollPane(list).apply {
+            border = null
+            setColumnHeaderView(stickyHeaderPanel)
+        }
+        // Repaint the floating category header whenever the viewport moves or
+        // the model rebuilds. Click on it = toggle that category's collapse —
+        // mirrors the in-list chevron behaviour so the sticky header is fully
+        // interactive, not decorative.
+        scrollList.viewport.addChangeListener { updateStickyHeader(scrollList.viewport) }
+        stickyHeaderPanel.cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+        stickyHeaderPanel.addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) {
+                stickyCategoryGroupKey?.let { toggleCollapse(it) }
+            }
+        })
         val scrollGrid = JBScrollPane(gridContainer).apply {
             border = null
             horizontalScrollBarPolicy = JBScrollPane.HORIZONTAL_SCROLLBAR_NEVER
@@ -465,35 +567,47 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
         listModel.clear()
         gridContainer.removeAll()
         
-        val grouped = RowGrouping.byCategory(filtered, collapsedCategories)
+        val subfamilyOn = TokenSelectorSettings.getInstance(project).librarySubfamilyGrouping
+        val grouped = RowGrouping.byCategory(filtered, collapsedCategories, subfamilyOn)
         grouped.forEach(listModel::addElement)
-        
+
         var currentWrap: JPanel? = null
+        var categoryCollapsed = false
         for (row in grouped) {
             when (row) {
                 is SeparatorPopupRow -> {
                     val header = PopupRowRenderer().getListCellRendererComponent(list, row, 0, false, false) as JComponent
                     header.maximumSize = Dimension(Int.MAX_VALUE, header.preferredSize.height)
                     header.alignmentX = java.awt.Component.LEFT_ALIGNMENT
-                    
-                    if (row.collapsible) {
-                        header.cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-                        header.addMouseListener(object : MouseAdapter() {
-                            override fun mouseClicked(e: MouseEvent) {
-                                toggleCollapse(row.groupKey)
-                            }
-                        })
-                    }
-                    gridContainer.add(header)
-                    
-                    if (!row.collapsed) {
-                        currentWrap = JPanel(CssGridLayout(JBUI.scale(180), JBUI.scale(90), JBUI.scale(12), JBUI.scale(12))).apply {
-                            border = JBUI.Borders.empty(4, 8, 12, 8)
-                            alignmentX = java.awt.Component.LEFT_ALIGNMENT
+
+                    if (row.level == 0) {
+                        // Category header: chevron toggles collapse, new grid wrap starts below.
+                        categoryCollapsed = row.collapsed
+                        if (row.collapsible) {
+                            header.cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                            header.addMouseListener(object : MouseAdapter() {
+                                override fun mouseClicked(e: MouseEvent) {
+                                    toggleCollapse(row.groupKey)
+                                }
+                            })
                         }
-                        gridContainer.add(currentWrap)
-                    } else {
-                        currentWrap = null
+                        gridContainer.add(header)
+                        currentWrap = if (!row.collapsed) {
+                            JPanel(CssGridLayout(JBUI.scale(180), JBUI.scale(90), JBUI.scale(12), JBUI.scale(12))).apply {
+                                border = JBUI.Borders.empty(4, 8, 12, 8)
+                                alignmentX = java.awt.Component.LEFT_ALIGNMENT
+                            }.also { gridContainer.add(it) }
+                        } else {
+                            null
+                        }
+                    } else if (!categoryCollapsed) {
+                        // Sub-family header: append a quiet label, then a fresh
+                        // card wrap so the next batch of cards flows under it.
+                        gridContainer.add(header)
+                        currentWrap = JPanel(CssGridLayout(JBUI.scale(180), JBUI.scale(90), JBUI.scale(12), JBUI.scale(12))).apply {
+                            border = JBUI.Borders.empty(0, 8, 8, 8)
+                            alignmentX = java.awt.Component.LEFT_ALIGNMENT
+                        }.also { gridContainer.add(it) }
                     }
                 }
                 is TokenPopupRow -> {
@@ -507,6 +621,9 @@ class DesignTokenDashboardPanel(private val project: Project) : SimpleToolWindow
         }
         gridContainer.revalidate()
         gridContainer.repaint()
+        // Sticky header tracks scroll position; rebuilding the model resets row
+        // indices so refresh it now to avoid pinning a stale category.
+        (list.parent as? javax.swing.JViewport)?.let { updateStickyHeader(it) }
     }
 
     /**

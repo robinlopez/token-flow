@@ -61,11 +61,14 @@ Supported formats: SCSS variables, CSS Custom Properties, SCSS Maps, TS/JS prese
     ]]></description>
 
     <change-notes><![CDATA[
-<h3>0.1.7 — Portable scope configuration</h3>
+<h3>0.1.7 — Portable scope configuration &amp; smarter Library</h3>
 <ul>
   <li><b>Export Config</b>: Settings → Token Flow → Scopes now has an <i>Export…</i> link that writes the current scopes to a JSON file. Share it with the team, commit it next to the project, or keep it as a backup.</li>
   <li><b>Import Config</b>: paired <i>Import…</i> link reads a JSON file produced by Export. The plugin asks whether to <b>Replace</b> the current scopes or <b>Merge</b> (existing scopes with the same name are overwritten, new ones are appended). Pending edits are persisted via Apply, so a teammate can preview the import before committing.</li>
   <li><b>Versioned format</b>: the JSON file carries a schema version. Older Token Flow builds refuse files produced by a future schema instead of silently dropping fields.</li>
+  <li><b>Library family / sub-family grouping</b>: inside each big category accordion, the Library can now insert a two-level hierarchy of headers — family (<code>HIGH</code>, <code>LOW</code>, <code>PRIMARY</code>) and sub-family (<code>SURFACE</code>, <code>CONTENT</code>, <code>STROKE</code>, …) — derived from the structure of token names alone. No hard-coded vocabulary; the algorithm adapts to any naming convention. Tokens indent under their header so the alignment reads like a tree. New toolbar toggle (group-by icon) next to the view-mode button; off by default — opt in from the panel.</li>
+  <li><b>Sticky category header</b>: scroll past a category and its header pins to the top of the Library viewport, with the same chevron behaviour as the in-list row.</li>
+  <li><b>Justified category bar</b>: layout is now <code>[chevron] TITLE … (count)</code>, with the count badge tinted so it can't be mistaken for a resolved token value.</li>
 </ul>
 
 <h3>0.1.6 — Smarter Library, sharper Analyser</h3>
