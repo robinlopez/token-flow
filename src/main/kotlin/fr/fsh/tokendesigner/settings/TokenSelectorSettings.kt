@@ -30,6 +30,16 @@ class Scope() {
      * Lets the user carve unrelated sub-modules out of a wide root.
      */
     @JvmField var analysisExcludedPaths: MutableList<String> = mutableListOf()
+    /**
+     * CSS custom-property *prefixes* (e.g. `--p-`, `--ion-`, `--mat-`) that
+     * identify variables injected at runtime by an external framework
+     * (PrimeNG, Ionic, Angular Material, …). The plugin never sees their
+     * declaration site, so it can't validate them; instead any `var(--p-foo)`
+     * matching one of these prefixes is treated as a known-external reference
+     * and excluded from broken-ref / hardcoded reports. Match is by literal
+     * `startsWith`, so list the prefix exactly as it appears in the CSS.
+     */
+    @JvmField var externalPrefixes: MutableList<String> = mutableListOf()
 
     constructor(
         name: String,
@@ -37,12 +47,14 @@ class Scope() {
         sourcePaths: List<String>,
         excludedPaths: List<String> = emptyList(),
         analysisExcludedPaths: List<String> = emptyList(),
+        externalPrefixes: List<String> = emptyList(),
     ) : this() {
         this.name = name
         this.rootPath = rootPath
         this.sourcePaths = sourcePaths.toMutableList()
         this.excludedPaths = excludedPaths.toMutableList()
         this.analysisExcludedPaths = analysisExcludedPaths.toMutableList()
+        this.externalPrefixes = externalPrefixes.toMutableList()
     }
 
     val isCommon: Boolean get() = rootPath.isBlank()
@@ -53,7 +65,8 @@ class Scope() {
         sourcePaths: List<String> = this.sourcePaths,
         excludedPaths: List<String> = this.excludedPaths,
         analysisExcludedPaths: List<String> = this.analysisExcludedPaths,
-    ): Scope = Scope(name, rootPath, sourcePaths, excludedPaths, analysisExcludedPaths)
+        externalPrefixes: List<String> = this.externalPrefixes,
+    ): Scope = Scope(name, rootPath, sourcePaths, excludedPaths, analysisExcludedPaths, externalPrefixes)
 }
 
 @State(
@@ -104,6 +117,14 @@ class TokenSelectorSettings : PersistentStateComponent<TokenSelectorSettings.Sta
          * Useful since tokens must be defined somewhere!
          */
         @JvmField var inspectVariableDeclarations: Boolean = false
+        /**
+         * One-shot dismissal flag for the framework-detection notification
+         * (PrimeNG / Ionic / Material / …) that fires the first time the
+         * plugin spots a known UI framework dependency. Persists across IDE
+         * sessions so the balloon never reappears once the user has answered
+         * or explicitly dismissed it.
+         */
+        @JvmField var frameworkPrefixesNotified: Boolean = false
 
         // Legacy single-list configuration. Kept for backward compatibility:
         // on first load it is migrated into a single common Scope and emptied.
@@ -172,6 +193,10 @@ class TokenSelectorSettings : PersistentStateComponent<TokenSelectorSettings.Sta
     var inspectVariableDeclarations: Boolean
         get() = state.inspectVariableDeclarations
         set(value) { state.inspectVariableDeclarations = value }
+
+    var frameworkPrefixesNotified: Boolean
+        get() = state.frameworkPrefixesNotified
+        set(value) { state.frameworkPrefixesNotified = value }
 
     /**
      * Listeners are notified after [iconVariantName] changes so live UI

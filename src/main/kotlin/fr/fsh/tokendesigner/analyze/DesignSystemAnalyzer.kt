@@ -284,6 +284,10 @@ class DesignSystemAnalyzer(private val project: Project) {
         val tokenNames = tokens.map { it.name }.toSet()
         val settings = TokenSelectorSettings.getInstance(project)
         val inspectVariableDeclarations = settings.inspectVariableDeclarations
+        // Union of external prefixes across every scope active for the chosen
+        // analysis target. `var(--p-foo)` matched by any of them is treated as
+        // a known-external reference and counted as tokenised (not broken).
+        val externalPrefixes = activeScopes.flatMap { it.externalPrefixes }.distinct()
 
         for (vf in files) {
             val text = try {
@@ -317,7 +321,12 @@ class DesignSystemAnalyzer(private val project: Project) {
                 referenced += name
 
                 if (name !in tokenNames && name !in ignoredNames && !name.startsWith("$")) {
-                    val resolved = resolveReferenceMatch(name, tokenNames, ignoredNames)
+                    if (externalPrefixes.isNotEmpty() && externalPrefixes.any { name.startsWith(it) }) {
+                        // Known external — neutral, not broken, not counted as
+                        // referenced (no canonical token to point at).
+                        return@forEach
+                    }
+                    val resolved = resolveReferenceMatch(name, tokenNames, ignoredNames, externalPrefixes)
                     if (resolved == null) {
                         broken += BrokenReference(
                             name = hit.text,
@@ -565,18 +574,27 @@ class DesignSystemAnalyzer(private val project: Project) {
         /**
          * Resolves a reference name to a known token (or ignored library
          * symbol). Thin wrapper over [TokenNameParser.resolveReference] that
-         * also accepts the `ignoredNames` set.
+         * also accepts the `ignoredNames` set, and recognises
+         * [externalPrefixes] — variables injected at runtime by an external
+         * framework (PrimeNG, Ionic, Material, …) — as legitimate references
+         * by returning the original name unchanged so callers stop flagging
+         * them as broken. The returned string for those cases is just `name`
+         * itself (we don't have a canonical entry to point at).
          */
         fun resolveReferenceMatch(
             name: String,
             tokenNames: Set<String>,
             ignoredNames: Set<String> = emptySet(),
+            externalPrefixes: List<String> = emptyList(),
         ): String? {
             fr.fsh.tokendesigner.scanner.TokenNameParser
                 .resolveReference(name, tokenNames)?.let { return it.tokenName }
             if (ignoredNames.isNotEmpty()) {
                 fr.fsh.tokendesigner.scanner.TokenNameParser
                     .resolveReference(name, ignoredNames)?.let { return it.tokenName }
+            }
+            if (externalPrefixes.isNotEmpty() && externalPrefixes.any { name.startsWith(it) }) {
+                return name
             }
             return null
         }

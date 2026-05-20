@@ -270,8 +270,12 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
                 // can't be inserted there.
                 val tokens = allTokens.filter { it.kind in compatibleKinds(ext) }
                 val ignoredNames = DesignSystemAnalyzer.getInstance(project).collectIgnoredNames(file)
+                val externalPrefixes = fr.fsh.tokendesigner.settings.ScopeResolver
+                    .activeScopesFor(project, file)
+                    .flatMap { it.externalPrefixes }
+                    .distinct()
                 val text = readAction { editor.document.text }
-                val rows = computeRows(tokens, ignoredNames, text)
+                val rows = computeRows(tokens, ignoredNames, externalPrefixes, text)
                 ApplicationManager.getApplication().invokeLater {
                     showResult(rows, allTokens.isEmpty(), file)
                 }
@@ -300,7 +304,12 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
         else -> fr.fsh.tokendesigner.model.TokenKind.entries.toSet()
     }
 
-    private fun computeRows(tokens: List<DesignToken>, ignoredNames: Set<String>, text: String): List<HardcodedRow> {
+    private fun computeRows(
+        tokens: List<DesignToken>,
+        ignoredNames: Set<String>,
+        externalPrefixes: List<String>,
+        text: String,
+    ): List<HardcodedRow> {
         val valueIndex = TokenValueIndex(tokens)
         val out = mutableListOf<HardcodedRow>()
         val ext = currentFile?.extension?.lowercase()
@@ -330,7 +339,13 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
                 if (name == null || name.startsWith("$") || name in ignoredNames) {
                     false
                 } else {
-                    DesignSystemAnalyzer.resolveReferenceMatch(name, tokenNames, ignoredNames) == null
+                    // Pass the configured external prefixes so framework-injected
+                    // CSS vars (PrimeNG `--p-…`, Ionic `--ion-…`) don't flag as
+                    // broken — there's no declaration in the tree, but they are
+                    // valid at runtime.
+                    DesignSystemAnalyzer.resolveReferenceMatch(
+                        name, tokenNames, ignoredNames, externalPrefixes,
+                    ) == null
                 }
             }
 
