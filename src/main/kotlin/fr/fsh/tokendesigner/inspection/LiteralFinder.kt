@@ -63,6 +63,14 @@ object LiteralFinder {
          * The name of the variable being declared, if [isDeclaration] is true.
          */
         val declarationName: String? = null,
+        /**
+         * True when the literal sits inside a SCSS map opened by `$name: (`
+         * or `"key": (`. Such literals are token *definitions* — flagging them
+         * as hardcoded creates noise on token-catalog files that declare colors
+         * / spacings via a nested map (the Style-Dictionary / theme-config
+         * pattern). Detected purely lexically; nested maps are supported.
+         */
+        val insideTokenMap: Boolean = false,
     )
 
     fun findIn(text: CharSequence): List<Hit> {
@@ -70,35 +78,56 @@ object LiteralFinder {
         // Compute fallback and comment ranges first; any literal inside them must NOT be flagged.
         val fallbackRanges = computeFallbackRanges(text)
         val commentRanges = computeCommentRanges(text)
+        // Pre-compute SCSS map opener positions so each literal can check
+        // membership in O(log n) instead of re-walking the whole file. The
+        // resulting ranges cover every char from `(` up to its matching `)`.
+        val mapRanges = computeTokenMapRanges(text)
 
         fun isIgnored(offset: Int): Boolean =
             isInsideFallback(offset, fallbackRanges) || commentRanges.any { offset in it }
+        fun insideMap(offset: Int): Boolean = mapRanges.any { offset in it }
 
         for (m in HEX_REGEX.findAll(text)) {
             if (isInsideTokenName(text, m.range.first)) continue
             if (isIgnored(m.range.first)) continue
             val hit = expandWrapper(text, m.value, m.range.first, m.range.last + 1, Kind.COLOR)
             val declName = variableDeclarationName(text, m.range.first)
-            out += hit.copy(isDeclaration = declName != null, declarationName = declName)
+            out += hit.copy(
+                isDeclaration = declName != null,
+                declarationName = declName,
+                insideTokenMap = insideMap(hit.startOffset),
+            )
         }
         for (m in FN_COLOR_REGEX.findAll(text)) {
             if (isIgnored(m.range.first)) continue
             val hit = expandWrapper(text, m.value, m.range.first, m.range.last + 1, Kind.COLOR)
             val declName = variableDeclarationName(text, m.range.first)
-            out += hit.copy(isDeclaration = declName != null, declarationName = declName)
+            out += hit.copy(
+                isDeclaration = declName != null,
+                declarationName = declName,
+                insideTokenMap = insideMap(hit.startOffset),
+            )
         }
         for (m in NAMED_COLOR_REGEX.findAll(text)) {
             if (isIgnored(m.range.first)) continue
             val hit = expandWrapper(text, m.value, m.range.first, m.range.last + 1, Kind.COLOR)
             val declName = variableDeclarationName(text, m.range.first)
-            out += hit.copy(isDeclaration = declName != null, declarationName = declName)
+            out += hit.copy(
+                isDeclaration = declName != null,
+                declarationName = declName,
+                insideTokenMap = insideMap(hit.startOffset),
+            )
         }
         for (m in DURATION_REGEX.findAll(text)) {
             if (isWhitelisted(m.value)) continue
             if (isIgnored(m.range.first)) continue
             val hit = expandWrapper(text, m.value, m.range.first, m.range.last + 1, Kind.DURATION)
             val declName = variableDeclarationName(text, m.range.first)
-            out += hit.copy(isDeclaration = declName != null, declarationName = declName)
+            out += hit.copy(
+                isDeclaration = declName != null,
+                declarationName = declName,
+                insideTokenMap = insideMap(hit.startOffset),
+            )
         }
         for (m in LENGTH_REGEX.findAll(text)) {
             if (isWhitelisted(m.value)) continue
@@ -107,7 +136,11 @@ object LiteralFinder {
             if (out.any { it.startOffset == m.range.first }) continue
             val hit = expandWrapper(text, m.value, m.range.first, m.range.last + 1, Kind.LENGTH)
             val declName = variableDeclarationName(text, m.range.first)
-            out += hit.copy(isDeclaration = declName != null, declarationName = declName)
+            out += hit.copy(
+                isDeclaration = declName != null,
+                declarationName = declName,
+                insideTokenMap = insideMap(hit.startOffset),
+            )
         }
         // Plain numbers in property-value position. The regex captures the
         // surrounding `IDENT:` for anchoring; group 1 is the number itself.
@@ -124,7 +157,12 @@ object LiteralFinder {
             // If the key starts with $ or is --, it's a variable declaration.
             val key = m.value.substringBefore(':').trim()
             val declName = if (key.startsWith("$") || key.startsWith("--")) key else null
-            out += Hit(value, start, end, Kind.NUMBER, isDeclaration = declName != null, declarationName = declName)
+            out += Hit(
+                value, start, end, Kind.NUMBER,
+                isDeclaration = declName != null,
+                declarationName = declName,
+                insideTokenMap = insideMap(start),
+            )
         }
 
         // Token references: var(--name), $name, {path}, dt('path')
@@ -303,6 +341,81 @@ object LiteralFinder {
 
     private fun isInsideFallback(offset: Int, ranges: List<IntRange>): Boolean =
         ranges.any { offset in it }
+
+    /**
+     * Returns every char-range opened by a SCSS-style map literal — i.e. `(`
+     * preceded (modulo whitespace) by `:` itself preceded by `$ident` or a
+     * quoted string `"…" / '…'`. Each returned range covers the `(`, its
+     * contents and the matching `)`. Nested maps are emitted as overlapping
+     * ranges so every depth gets covered. A single pass through the file is
+     * enough; on unbalanced files the outermost `(` simply remains unclosed
+     * and is dropped.
+     */
+    private fun computeTokenMapRanges(text: CharSequence): List<IntRange> {
+        val out = mutableListOf<IntRange>()
+        val stack = ArrayDeque<Int>()         // indices of currently-open '(' (any kind)
+        val mapOpenStack = ArrayDeque<Int>()  // indices of opens that are map openers
+        var i = 0
+        val n = text.length
+        while (i < n) {
+            val c = text[i]
+            when (c) {
+                '"', '\'' -> {
+                    // Skip string content (incl. escapes) so parens inside
+                    // strings don't pollute the stack.
+                    val quote = c
+                    i++
+                    while (i < n && text[i] != quote) {
+                        if (text[i] == '\\' && i + 1 < n) i++
+                        i++
+                    }
+                }
+                '/' -> {
+                    // Skip line/block comments to mirror computeCommentRanges.
+                    if (i + 1 < n && text[i + 1] == '/') {
+                        while (i < n && text[i] != '\n') i++
+                    } else if (i + 1 < n && text[i + 1] == '*') {
+                        i += 2
+                        while (i + 1 < n && !(text[i] == '*' && text[i + 1] == '/')) i++
+                        i += 1   // land on the '/' of '*/', outer `i++` skips it
+                    }
+                }
+                '(' -> {
+                    stack.addLast(i)
+                    if (isMapOpener(text, i)) mapOpenStack.addLast(i)
+                }
+                ')' -> {
+                    val open = stack.removeLastOrNull()
+                    if (open != null && mapOpenStack.lastOrNull() == open) {
+                        mapOpenStack.removeLast()
+                        out += open..i
+                    }
+                }
+            }
+            i++
+        }
+        return out
+    }
+
+    /**
+     * True when the `(` at [parenIdx] is preceded by `:` then a *key* (either
+     * a `$variable` identifier or a quoted string). That's the syntactic shape
+     * of a SCSS map opener.
+     */
+    private fun isMapOpener(text: CharSequence, parenIdx: Int): Boolean {
+        var j = parenIdx - 1
+        while (j >= 0 && text[j].isWhitespace()) j--
+        if (j < 0 || text[j] != ':') return false
+        j--
+        while (j >= 0 && text[j].isWhitespace()) j--
+        if (j < 0) return false
+        // Quoted-string key: walk back to the matching quote and accept.
+        if (text[j] == '"' || text[j] == '\'') return true
+        // `$ident` / `$ident-with-dashes` key.
+        var k = j
+        while (k >= 0 && (text[k].isLetterOrDigit() || text[k] == '-' || text[k] == '_')) k--
+        return k >= 0 && text[k] == '$'
+    }
 
     /**
      * Returns ranges of both block (`/* ... */`) and line (`// ...`) comments.

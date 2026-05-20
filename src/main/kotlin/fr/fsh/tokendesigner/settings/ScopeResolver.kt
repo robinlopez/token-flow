@@ -50,6 +50,23 @@ object ScopeResolver {
         return if (deepest != null) commons + deepest else commons
     }
 
+    /**
+     * Returns `true` when [file] is listed (or sits under a folder listed) as a
+     * `sourcePaths` entry of any configured scope — i.e. the user declared it as
+     * a token-declaration site. Used by Hardcoded Values to suppress noise on
+     * files whose whole purpose is to *define* values.
+     */
+    fun isTokenSourceFile(project: Project, file: VirtualFile): Boolean {
+        val filePath = file.path
+        for (scope in TokenSelectorSettings.getInstance(project).scopes) {
+            for (src in scope.sourcePaths) {
+                val abs = absolutize(project, src) ?: continue
+                if (filePath == abs || filePath.startsWith("$abs/")) return true
+            }
+        }
+        return false
+    }
+
     fun absolutize(project: Project, stored: String): String? {
         if (stored.isBlank()) return null
         return if (Paths.get(stored).isAbsolute) {

@@ -236,6 +236,20 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
             return
         }
 
+        // Token-source files (declared in any scope's `sourcePaths`) define
+        // values — flagging them as hardcoded would be pure noise. Show an
+        // explanatory empty state and bail out before the scan.
+        if (fr.fsh.tokendesigner.settings.ScopeResolver.isTokenSourceFile(project, file)) {
+            showEmpty(
+                "<i>${file.name}</i> is declared as a <b>token source</b> in the active scope.<br/>" +
+                    "Hardcoded value detection is disabled here — every literal in this file " +
+                    "is part of a token definition.<br/>" +
+                    "<span style='color:#888'>Edit the scope's sources in Settings → Token Flow if " +
+                    "you want to include / exclude this file.</span>"
+            )
+            return
+        }
+
         val scopes = fr.fsh.tokendesigner.settings.ScopeResolver.activeScopesFor(project, file)
         val deepest = scopes.lastOrNull { !it.isCommon }
         scopeLabel.text = if (deepest != null) {
@@ -305,6 +319,9 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
         for (hit in LiteralFinder.findIn(text)) {
             if (styleRanges != null && styleRanges.none { hit.startOffset in it }) continue
             if (hit.isDeclaration && (!inspectVariableDeclarations || (hit.declarationName != null && hit.declarationName in tokenNames))) continue
+            // SCSS-map values (`"key": #001a70,`) are token definitions, not
+            // hardcoded usages — drop them regardless of the declaration toggle.
+            if (hit.insideTokenMap) continue
             if (hit.kind == LiteralFinder.Kind.NUMBER && !isJs) continue
             if (isJs && hit.insidePartialString) continue
 
