@@ -3,9 +3,12 @@ package fr.fsh.tokendesigner.inspection
 import fr.fsh.tokendesigner.model.DesignToken
 import fr.fsh.tokendesigner.model.TokenCategory
 import fr.fsh.tokendesigner.model.TokenKind
+import fr.fsh.tokendesigner.model.TokenRole
 import fr.fsh.tokendesigner.ui.ColorParser
 import java.awt.Color
 import kotlin.math.abs
+
+enum class TokenTier { PRIMITIVE, SEMANTIC, COMPONENT }
 
 data class TokenSuggestion(
     val token: DesignToken,
@@ -40,6 +43,7 @@ object SuggestionEngine {
         valueIndex: TokenValueIndex,
         allTokens: List<DesignToken>,
         expectedCategory: TokenCategory?,
+        expectedRole: TokenRole? = null,
     ): List<TokenSuggestion> {
         // Prefer the CSS-property-derived category over the literal's natural
         // one when known: `padding: 6px` looks up under SPACING, `font-size:
@@ -56,7 +60,7 @@ object SuggestionEngine {
         if (exact.isNotEmpty() || helperMatches.isNotEmpty()) {
             val direct = exact.map { TokenSuggestion(it, exact = true, delta = 0.0) }
             return (direct + helperMatches)
-                .sortedBy { score(it, expectedCategory) }
+                .sortedBy { score(it, expectedCategory, expectedRole) }
                 .take(MAX_SUGGESTIONS)
         }
         if (hit.kind == LiteralFinder.Kind.COLOR) {
@@ -68,7 +72,10 @@ object SuggestionEngine {
                     val delta = colorDistance(literalColor, tokenColor)
                     if (delta <= COLOR_DELTA_MAX) TokenSuggestion(token, exact = false, delta = delta) else null
                 }
-                .sortedBy { it.delta }
+                // Primary: color distance. Secondary: semantic score, so when
+                // two tokens sit at near-identical distance the one with the
+                // right role (e.g. -surface- on a `background`) wins.
+                .sortedWith(compareBy({ it.delta }, { score(it, expectedCategory, expectedRole) }))
                 .take(MAX_SUGGESTIONS)
                 .toList()
         }
@@ -78,7 +85,7 @@ object SuggestionEngine {
                 // If the broken reference has a fallback value (e.g. #f0f0f0),
                 // try to suggest tokens that match that specific value first.
                 val kind = if (ColorParser.parse(fallback) != null) LiteralFinder.Kind.COLOR else LiteralFinder.Kind.NUMBER
-                val suggestions = findSuggestions(LiteralFinder.Hit(fallback, 0, 0, kind), valueIndex, allTokens, expectedCategory)
+                val suggestions = findSuggestions(LiteralFinder.Hit(fallback, 0, 0, kind), valueIndex, allTokens, expectedCategory, expectedRole)
                 if (suggestions.isNotEmpty()) return suggestions
             }
 
@@ -158,11 +165,100 @@ object SuggestionEngine {
     private fun formatProduced(d: Double): String =
         if (d == d.toLong().toDouble()) d.toLong().toString() else d.toString()
 
-    private fun score(s: TokenSuggestion, expected: TokenCategory?): Int {
+    /**
+     * Multi-criterion ranking. Lower = better.
+     *
+     * Weights are calibrated so that, in order of dominance:
+     *  1. category match beats anything else,
+     *  2. role match/mismatch dominates over tier,
+     *  3. tier (semantic > component > primitive) sorts equal-role candidates,
+     *  4. token-name length is only a final tiebreaker.
+     *
+     * The primitive penalty is intentionally *relative*: when no semantic
+     * alternative shares the same value, primitives still surface — they're
+     * just outranked when a semantic sibling exists (the canonical case is
+     * `--units-xl` vs `--spacing-xl`, both 32px).
+     */
+    private fun score(
+        s: TokenSuggestion,
+        expectedCategory: TokenCategory?,
+        expectedRole: TokenRole?,
+    ): Int {
         var n = 0
-        if (expected != null && s.token.category == expected) n -= 100
-        n += s.token.name.length
+        val nameNorm = s.token.name.lowercase().trimStart('-', '$')
+
+        // 1. Category alignment with the surrounding CSS property.
+        if (expectedCategory != null && s.token.category == expectedCategory) n -= 100
+
+        // 2. Role alignment (surface / content / stroke / effect).
+        if (expectedRole != null) {
+            val role = roleOf(nameNorm)
+            when {
+                role == expectedRole -> n -= 80
+                role == null -> Unit                // unknown — neutral
+                else -> n += 60                     // wrong role — actively demote
+            }
+        }
+
+        // 3. Token tier: prefer semantic > component > primitive.
+        when (tierOf(nameNorm)) {
+            TokenTier.SEMANTIC -> n -= 30
+            TokenTier.COMPONENT -> n -= 10
+            TokenTier.PRIMITIVE -> n += 40
+        }
+
+        // 4. Exact-value matches beat fuzzy / helper-derived ones.
+        if (!s.exact) n += 5
+
+        // 5. Name length — only kicks in as a last tiebreaker (divided so it
+        //    can't outweigh a tier or role decision).
+        n += s.token.name.length / 4
+
         return n
+    }
+
+    private val PRIMITIVE_PREFIXES = setOf(
+        "units", "unit", "palette", "base", "primitive", "primitives",
+        "core", "scale", "raw",
+    )
+    private val COMPONENT_PREFIXES = setOf(
+        "comp", "component", "components",
+    )
+
+    /**
+     * Classifies a token name into a DS tier based on its leading segment.
+     * Conservative: only flags as PRIMITIVE names that *clearly* belong to a
+     * raw-scale layer (e.g. `units-`, `palette-`). When in doubt, falls back
+     * to SEMANTIC so we don't accidentally demote legitimate suggestions.
+     */
+    fun tierOf(rawName: String): TokenTier {
+        val n = rawName.lowercase().trimStart('-', '$')
+        val head = n.substringBefore('-')
+        return when {
+            head in PRIMITIVE_PREFIXES -> TokenTier.PRIMITIVE
+            n.startsWith("token-") || head in COMPONENT_PREFIXES -> TokenTier.COMPONENT
+            else -> TokenTier.SEMANTIC
+        }
+    }
+
+    /**
+     * Extracts the role segment from a token name. Looks for `-surface-`,
+     * `-content-`, `-stroke-`, etc. as hyphen-delimited segments anywhere in
+     * the name (also matches at the start, e.g. `surface-default`). Returns
+     * `null` when no recognised role marker is present.
+     */
+    fun roleOf(rawName: String): TokenRole? {
+        val n = rawName.lowercase().trimStart('-', '$')
+        val segments = n.split('-')
+        for (seg in segments) {
+            when (seg) {
+                "surface", "background", "bg", "fill", "canvas" -> return TokenRole.SURFACE
+                "content", "text", "foreground", "fg", "label", "icon" -> return TokenRole.CONTENT
+                "stroke", "border", "outline", "divider" -> return TokenRole.STROKE
+                "shadow", "focus", "effect", "effects", "glow" -> return TokenRole.EFFECT
+            }
+        }
+        return null
     }
 
     private fun colorDistance(a: Color, b: Color): Double {

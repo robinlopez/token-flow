@@ -7,7 +7,6 @@ import com.intellij.codeInspection.ProblemDescriptor
 import com.intellij.codeInspection.ProblemHighlightType
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.TextRange
-import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiFile
 import fr.fsh.tokendesigner.model.TokenCategory
 import fr.fsh.tokendesigner.model.TokenKind
@@ -45,7 +44,7 @@ class HardcodedValueInspection : LocalInspectionTool() {
         if (ext !in TARGET_EXTS) return null
 
         val project = file.project
-        if (isTokenSourceFile(project, vf)) return null
+        if (ScopeResolver.isTokenSourceFile(project, vf)) return null
 
         // Restrict candidates to the kind that makes syntactic sense in this
         // file. A `'12px'` literal in a `.ts` file should yield a JS object
@@ -76,6 +75,11 @@ class HardcodedValueInspection : LocalInspectionTool() {
             // variable declaration (e.g. `$color: #fff`) because tokens must
             // be defined somewhere!
             if (hit.isDeclaration && !settings.inspectVariableDeclarations) continue
+            // SCSS-map entries (`"key": #001a70,` inside `$themes-config: (...)`)
+            // are token definitions, not hardcoded usages — skip them whether or
+            // not the surrounding file is registered as a token source. Catches
+            // mixed files where token maps live alongside regular styles.
+            if (hit.insideTokenMap) continue
 
             // Plain numbers (`fontSize: 34`) only make sense in JS / TS object
             // syntax — flagging them in CSS would catch every shorthand value
@@ -88,7 +92,8 @@ class HardcodedValueInspection : LocalInspectionTool() {
             // hand if they want to.
             if (isJs && hit.insidePartialString) continue
             val expected = PropertyContext.detectAt(text, hit.startOffset)
-            val suggestions = SuggestionEngine.findSuggestions(hit, valueIndex, tokens, expected)
+            val expectedRole = PropertyContext.detectRoleAt(text, hit.startOffset)
+            val suggestions = SuggestionEngine.findSuggestions(hit, valueIndex, tokens, expected, expectedRole)
             if (suggestions.isEmpty()) continue
 
             val first = suggestions.first()
@@ -118,20 +123,6 @@ class HardcodedValueInspection : LocalInspectionTool() {
             val deltaPct = (first.delta * 100).toInt()
             "Closest design token to ${hit.replaceText}: $prefixedName (≈${deltaPct}% off)$context"
         }
-    }
-
-    // ─── Token source detection ──────────────────────────────────────────
-
-    private fun isTokenSourceFile(project: Project, file: VirtualFile): Boolean {
-        val settings = TokenSelectorSettings.getInstance(project)
-        val targetPath = file.path
-        for (scope in settings.scopes) {
-            for (src in scope.sourcePaths) {
-                val abs = ScopeResolver.absolutize(project, src) ?: continue
-                if (targetPath == abs || targetPath.startsWith("$abs/")) return true
-            }
-        }
-        return false
     }
 
     private fun compatibleKinds(ext: String): Set<TokenKind> = when (ext) {

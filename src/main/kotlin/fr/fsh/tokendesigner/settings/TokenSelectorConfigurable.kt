@@ -76,6 +76,10 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
     private val scopeAnalysisExcludedPathsList = JBList(scopeAnalysisExcludedPathsModel).apply {
         emptyText.text = "Add folders/files inside the root to skip during analysis."
     }
+    private val scopeExternalPrefixesModel = DefaultListModel<String>()
+    private val scopeExternalPrefixesList = JBList(scopeExternalPrefixesModel).apply {
+        emptyText.text = "Add CSS custom-property prefixes injected by external frameworks (e.g. --p-, --ion-)."
+    }
     private val scopeDetailContainer = JPanel(BorderLayout())
 
 
@@ -217,7 +221,8 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
         return !saved.scopes.zip(current).all { (s1, s2) ->
             s1.name == s2.name && s1.rootPath == s2.rootPath &&
             s1.sourcePaths == s2.sourcePaths && s1.excludedPaths == s2.excludedPaths &&
-            s1.analysisExcludedPaths == s2.analysisExcludedPaths
+            s1.analysisExcludedPaths == s2.analysisExcludedPaths &&
+            s1.externalPrefixes == s2.externalPrefixes
         }
     }
 
@@ -461,6 +466,8 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
         row.excludedPaths.forEach(scopeExcludedPathsModel::addElement)
         scopeAnalysisExcludedPathsModel.clear()
         row.analysisExcludedPaths.forEach(scopeAnalysisExcludedPathsModel::addElement)
+        scopeExternalPrefixesModel.clear()
+        row.externalPrefixes.forEach(scopeExternalPrefixesModel::addElement)
         suppressDetailListeners = false
 
 
@@ -479,6 +486,12 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
         val analysisExcludedDecorated = ToolbarDecorator.createDecorator(scopeAnalysisExcludedPathsList)
             .setAddAction { addPath(scopeAnalysisExcludedPathsModel) }
             .setRemoveAction { removeSelectedPaths(scopeAnalysisExcludedPathsList, scopeAnalysisExcludedPathsModel) }
+            .disableUpDownActions()
+            .createPanel()
+
+        val externalDecorated = ToolbarDecorator.createDecorator(scopeExternalPrefixesList)
+            .setAddAction { addExternalPrefix() }
+            .setRemoveAction { removeSelectedPaths(scopeExternalPrefixesList, scopeExternalPrefixesModel) }
             .disableUpDownActions()
             .createPanel()
 
@@ -537,6 +550,10 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
                     analysisExcludedDecorated,
                 ),
             )
+            addTab(
+                "External",
+                externalTabBody(externalDecorated),
+            )
         }
 
         return JPanel(BorderLayout()).apply {
@@ -570,6 +587,111 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
         for (i in 0 until scopeExcludedPathsModel.size) row.excludedPaths.add(scopeExcludedPathsModel.get(i))
         row.analysisExcludedPaths.clear()
         for (i in 0 until scopeAnalysisExcludedPathsModel.size) row.analysisExcludedPaths.add(scopeAnalysisExcludedPathsModel.get(i))
+        row.externalPrefixes.clear()
+        for (i in 0 until scopeExternalPrefixesModel.size) row.externalPrefixes.add(scopeExternalPrefixesModel.get(i))
+    }
+
+    // ─── External prefixes (per-scope) ───────────────────────────────────
+
+    /**
+     * Asks the user for a prefix string. Normalises it so common typos —
+     * forgetting the leading `--`, accidental trailing whitespace — still
+     * produce a working entry. Duplicates inside the same scope are silently
+     * dropped.
+     */
+    private fun addExternalPrefix() {
+        val raw = Messages.showInputDialog(
+            project,
+            "Prefix to treat as a known external token (will match every var(--prefix-*) reference):",
+            "Add External Prefix",
+            Messages.getQuestionIcon(),
+            "--",
+            null,
+        )?.trim() ?: return
+        if (raw.isEmpty()) return
+        val normalised = if (raw.startsWith("--")) raw else "--$raw"
+        val existing = (0 until scopeExternalPrefixesModel.size)
+            .map { scopeExternalPrefixesModel.get(it) }
+            .toSet()
+        if (normalised in existing) return
+        scopeExternalPrefixesModel.addElement(normalised)
+    }
+
+    /**
+     * "External" tab body: small explainer at the top + the path-list panel +
+     * an auto-detect button that scans `package.json` for known frameworks
+     * (PrimeNG, Ionic, Angular Material, …) and one-clicks their prefix into
+     * the list. Plus a hint pointing at the Sources tab for the validation
+     * path (frameworks shipping their CSS vars as a static stylesheet).
+     */
+    private fun externalTabBody(listPanel: JComponent): JComponent {
+        val intro = htmlMultiLine(
+            "<span style='color:gray; font-size: 90%'>" +
+                "CSS custom-property prefixes injected at runtime by an external framework " +
+                "(PrimeNG <code>--p-</code>, Ionic <code>--ion-</code>, Angular Material " +
+                "<code>--mat-</code>, …). References matching one of these prefixes are " +
+                "treated as known-external and won't be flagged as broken in the Analyser or " +
+                "the Hardcoded Values panel. Use the <b>Sources</b> tab instead if you want " +
+                "Token Flow to <i>validate</i> the variable names (works when the framework " +
+                "ships its CSS vars as a static stylesheet — Ionic, Bootstrap, etc.)." +
+                "</span>",
+        ).apply {
+            border = JBUI.Borders.emptyBottom(6)
+        }
+
+        val detectBtn = HyperlinkLabel("Auto-detect from package.json…").apply {
+            toolTipText = "Scan the project for known frameworks (PrimeNG, Ionic, Material, …) " +
+                "and add their CSS-var prefixes to this scope."
+            addHyperlinkListener { runAutoDetectIntoCurrentScope() }
+        }
+        val detectRow = JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(6), 0)).apply {
+            isOpaque = false
+            border = JBUI.Borders.emptyTop(4)
+            add(detectBtn)
+        }
+
+        return JPanel(BorderLayout()).apply {
+            border = JBUI.Borders.empty(8, 4, 4, 4)
+            add(intro, BorderLayout.NORTH)
+            add(listPanel, BorderLayout.CENTER)
+            add(detectRow, BorderLayout.SOUTH)
+        }
+    }
+
+    /**
+     * Runs the framework detector and, for every framework whose prefix
+     * isn't already in this scope's list, appends it. Surfaces a small
+     * popup summarising what was added (or nothing-found state) so the
+     * action never feels silent.
+     */
+    private fun runAutoDetectIntoCurrentScope() {
+        val detections = FrameworkPrefixDetector.detect(project)
+        if (detections.isEmpty()) {
+            Messages.showInfoMessage(
+                project,
+                "No known framework detected in any package.json (looked for PrimeNG, Ionic, " +
+                    "Angular Material, Material WC, Vuetify, Bootstrap, Quasar, Element Plus, " +
+                    "Mantine, Carbon).",
+                "Auto-detect External Prefixes",
+            )
+            return
+        }
+        val existing = (0 until scopeExternalPrefixesModel.size)
+            .map { scopeExternalPrefixesModel.get(it) }
+            .toSet()
+        val added = mutableListOf<String>()
+        for (det in detections) {
+            if (det.framework.prefix in existing) continue
+            scopeExternalPrefixesModel.addElement(det.framework.prefix)
+            added += "${det.framework.displayName} (${det.framework.prefix})"
+        }
+        val msg = if (added.isEmpty()) {
+            "All detected prefixes were already present:\n\n" +
+                detections.joinToString("\n") { "• ${it.framework.displayName} (${it.framework.prefix})" }
+        } else {
+            "Added:\n\n" + added.joinToString("\n") { "• $it" }
+        }
+        Messages.showInfoMessage(project, msg, "Auto-detect External Prefixes")
     }
 
     // ─── Reorder ──────────────────────────────────────────────────────────
@@ -744,7 +866,8 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
         return a.zip(b).all { (x, y) ->
             x.name == y.name && x.rootPath == y.rootPath &&
                 x.sourcePaths == y.sourcePaths && x.excludedPaths == y.excludedPaths &&
-                x.analysisExcludedPaths == y.analysisExcludedPaths
+                x.analysisExcludedPaths == y.analysisExcludedPaths &&
+                x.externalPrefixes == y.externalPrefixes
         }
     }
 
@@ -764,6 +887,7 @@ internal class ScopeRow(
     var sourcePaths: MutableList<String>,
     var excludedPaths: MutableList<String> = mutableListOf(),
     var analysisExcludedPaths: MutableList<String> = mutableListOf(),
+    var externalPrefixes: MutableList<String> = mutableListOf(),
 ) {
     fun toScope(): Scope = Scope(
         name = name,
@@ -771,6 +895,7 @@ internal class ScopeRow(
         sourcePaths = sourcePaths.toList(),
         excludedPaths = excludedPaths.toList(),
         analysisExcludedPaths = analysisExcludedPaths.toList(),
+        externalPrefixes = externalPrefixes.toList(),
     )
 
     companion object {
@@ -780,9 +905,12 @@ internal class ScopeRow(
             scope.sourcePaths.toMutableList(),
             scope.excludedPaths.toMutableList(),
             scope.analysisExcludedPaths.toMutableList(),
+            scope.externalPrefixes.toMutableList(),
         )
 
-        fun empty(): ScopeRow = ScopeRow("New scope", "", mutableListOf(), mutableListOf(), mutableListOf())
+        fun empty(): ScopeRow = ScopeRow(
+            "New scope", "", mutableListOf(), mutableListOf(), mutableListOf(), mutableListOf(),
+        )
     }
 }
 

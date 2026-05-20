@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "fr.fsh.tokendesigner"
-version = "0.1.7"
+version = "0.1.8"
 
 repositories {
     mavenCentral()

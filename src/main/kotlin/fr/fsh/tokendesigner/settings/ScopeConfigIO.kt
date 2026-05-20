@@ -14,7 +14,10 @@ import com.google.gson.JsonSyntaxException
  */
 object ScopeConfigIO {
 
-    const val CURRENT_VERSION: Int = 1
+    // Schema version 2 adds `externalPrefixes` per scope (framework CSS vars
+    // like PrimeNG/Ionic). Version 1 files load fine — missing fields default
+    // to empty lists — so older configs remain importable.
+    const val CURRENT_VERSION: Int = 2
 
     private val gson = GsonBuilder().setPrettyPrinting().create()
 
@@ -67,6 +70,7 @@ object ScopeConfigIO {
         val sourcePaths: List<String> = emptyList(),
         val excludedPaths: List<String> = emptyList(),
         val analysisExcludedPaths: List<String> = emptyList(),
+        val externalPrefixes: List<String> = emptyList(),
     ) {
         fun toScope(): Scope = Scope(
             name = name,
@@ -74,6 +78,7 @@ object ScopeConfigIO {
             sourcePaths = sourcePaths,
             excludedPaths = excludedPaths,
             analysisExcludedPaths = analysisExcludedPaths,
+            externalPrefixes = externalPrefixes,
         )
 
         companion object {
@@ -83,6 +88,7 @@ object ScopeConfigIO {
                 sourcePaths = s.sourcePaths.toList(),
                 excludedPaths = s.excludedPaths.toList(),
                 analysisExcludedPaths = s.analysisExcludedPaths.toList(),
+                externalPrefixes = s.externalPrefixes.toList(),
             )
         }
     }
