@@ -2,6 +2,14 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/) — versionning [SemVer](https://semver.org/).
 
+## [0.1.8] — 2026-05-20
+
+### Changed
+- **Suggestion engine — token tier awareness** : tokens are now classified as *primitive* (`units-`, `palette-`, `base-`, `primitive-`, `core-`, `scale-`, `raw-`), *component* (`token-`, `comp-`, `component-`) or *semantic* (everything else), and the suggestion ranker prefers semantic tokens when several candidates share the same resolved value. Fixes the long-standing case where `padding: 32px` proposed `var(--units-xl)` instead of `var(--spacing-xl)` — both being legitimately equal to `32px` but the latter being the semantic spacing token.
+- **Suggestion engine — property-to-role matching for colors** : the inspection now derives an expected *role* (surface / content / stroke / effect) from the CSS property at the literal's position and matches it against the token name. Tokens carrying the right role segment (`-surface-`, `-content-`, `-stroke-`, `-shadow-`, `-focus-`, etc.) get a strong score boost ; tokens carrying a conflicting role are actively demoted. So `background: #005bff` now prefers `token-actions-high-surface-default` over a same-value `*-content-*` token, and `color: …` does the opposite. Properties mapped : `background[-color]`/`fill` → surface ; `color`/`caret-color`/`accent-color`/`text-decoration-color` → content ; `border-color`/`outline-color`/`stroke` → stroke ; `box-shadow`/`text-shadow`/`outline`/`filter`/`backdrop-filter` → effect.
+- **Suggestion engine — multi-criterion ranking** : `score()` was rewritten from "category match minus shortest name wins" to a weighted combination of (category alignment, role alignment, tier, exact-vs-fuzzy, length). Token-name length is now a *last-resort* tiebreaker, so a longer-but-more-semantic name can outrank a shorter primitive one — which the previous ranking made impossible.
+- **Suggestion engine — fuzzy color tiebreaking** : when no exact color match exists and the engine falls back to RGB-distance suggestions, ties at near-identical distance are now broken by the semantic score, so a `background: #006cff` surfaces a `-surface-` token rather than a same-distance `-content-` one.
+
 ## [0.1.7] — 2026-05-19
 
 ### Added

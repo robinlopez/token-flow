@@ -277,9 +277,10 @@ object TokenAlternativesShower {
                 val tokens = allTokens.filter { it.kind in compatibleKinds(ext) }
                 val text = readAction { editor.document.text }
                 val expected = PropertyContext.detectAt(text, hit.startOffset)
+                val expectedRole = PropertyContext.detectRoleAt(text, hit.startOffset)
                 val valueIndex = TokenValueIndex(tokens)
                 val suggestions = if (isJsExt(ext) && hit.insidePartialString) emptyList()
-                else SuggestionEngine.findSuggestions(hit, valueIndex, tokens, expected)
+                else SuggestionEngine.findSuggestions(hit, valueIndex, tokens, expected, expectedRole)
 
                 ApplicationManager.getApplication().invokeLater {
                     if (editor.isDisposed) return@invokeLater

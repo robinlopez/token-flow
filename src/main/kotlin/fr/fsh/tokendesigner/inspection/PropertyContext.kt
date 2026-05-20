@@ -1,6 +1,7 @@
 package fr.fsh.tokendesigner.inspection
 
 import fr.fsh.tokendesigner.model.TokenCategory
+import fr.fsh.tokendesigner.model.TokenRole
 
 /**
  * Maps CSS property names to the [TokenCategory] one would expect to see
@@ -28,6 +29,31 @@ object PropertyContext {
         val window = text.subSequence(start, offset)
         val match = PROP_REGEX.findAll(window).lastOrNull() ?: return null
         return match.groupValues[1].lowercase()
+    }
+
+    /** Same as [detectAt] but returns the expected [TokenRole], if any. */
+    fun detectRoleAt(text: CharSequence, offset: Int): TokenRole? {
+        val name = detectPropertyNameAt(text, offset) ?: return null
+        return roleFor(name)
+    }
+
+    /**
+     * Maps a CSS property to the [TokenRole] that a well-named DS token
+     * targeting it should carry. Returns `null` for properties without a clear
+     * surface/content/stroke/effect axis (e.g. `padding`, `font-size`).
+     */
+    fun roleFor(property: String): TokenRole? {
+        val p = property.lowercase()
+        return when {
+            p == "color" || p in CONTENT_PROPS -> TokenRole.CONTENT
+            p == "background" || p == "background-color" || p == "fill" -> TokenRole.SURFACE
+            p == "border-color" || p.endsWith("-border-color") ||
+                p == "outline-color" || p == "column-rule-color" ||
+                p == "stroke" -> TokenRole.STROKE
+            p == "box-shadow" || p == "text-shadow" || p == "filter" ||
+                p == "backdrop-filter" || p == "outline" -> TokenRole.EFFECT
+            else -> null
+        }
     }
 
     fun categoryFor(property: String): TokenCategory? {
@@ -72,5 +98,9 @@ object PropertyContext {
     )
     private val TYPO_PROPS = setOf(
         "line-height", "letter-spacing", "word-spacing", "text-indent",
+    )
+    private val CONTENT_PROPS = setOf(
+        "caret-color", "accent-color", "text-decoration-color",
+        "-webkit-text-fill-color",
     )
 }

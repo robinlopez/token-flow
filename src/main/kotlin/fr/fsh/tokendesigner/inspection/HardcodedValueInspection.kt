@@ -88,7 +88,8 @@ class HardcodedValueInspection : LocalInspectionTool() {
             // hand if they want to.
             if (isJs && hit.insidePartialString) continue
             val expected = PropertyContext.detectAt(text, hit.startOffset)
-            val suggestions = SuggestionEngine.findSuggestions(hit, valueIndex, tokens, expected)
+            val expectedRole = PropertyContext.detectRoleAt(text, hit.startOffset)
+            val suggestions = SuggestionEngine.findSuggestions(hit, valueIndex, tokens, expected, expectedRole)
             if (suggestions.isEmpty()) continue
 
             val first = suggestions.first()

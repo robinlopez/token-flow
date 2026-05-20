@@ -61,6 +61,14 @@ Supported formats: SCSS variables, CSS Custom Properties, SCSS Maps, TS/JS prese
     ]]></description>
 
     <change-notes><![CDATA[
+<h3>0.1.8 — Sharper token suggestions (tier &amp; role aware)</h3>
+<ul>
+  <li><b>Token tier awareness</b>: when several DS tokens share the same value (<code>--units-xl</code> and <code>--spacing-xl</code> both <code>32px</code>), the suggestion engine now prefers the <i>semantic</i> token over the <i>primitive</i> one. Primitive prefixes recognised: <code>units-</code>, <code>palette-</code>, <code>base-</code>, <code>primitive-</code>, <code>core-</code>, <code>scale-</code>, <code>raw-</code>. So <code>padding: 32px</code> now suggests <code>var(--spacing-xl)</code> instead of <code>var(--units-xl)</code>.</li>
+  <li><b>Property-to-role matching for colors</b>: <code>background</code>, <code>color</code>, <code>border-color</code>, <code>box-shadow</code>… now derive an expected <i>role</i> (surface / content / stroke / effect) and match it against token-name segments. Tokens carrying the right role get a strong boost; tokens carrying a conflicting role are demoted. So <code>background: #005bff</code> prefers <code>token-actions-high-surface-default</code> over <code>global-default-content-default</code>, and <code>color: #001a70</code> does the opposite.</li>
+  <li><b>Multi-criterion ranking</b>: the suggestion score was rewritten as a weighted combination of (category, role, tier, exact-vs-fuzzy, length). Token-name length is now only a tiebreaker — a longer-but-more-semantic name can outrank a shorter primitive one, which was impossible before.</li>
+  <li><b>Fuzzy color tiebreaking</b>: when no exact color match exists, ties at near-identical RGB distance are broken by the semantic score so the role-appropriate token surfaces first.</li>
+</ul>
+
 <h3>0.1.7 — Portable scope configuration, smarter Library &amp; Vue SFCs</h3>
 <ul>
   <li><b>Vue Single File Components (<code>.vue</code>)</b>: tokens declared in <code>&lt;style&gt;</code> and <code>&lt;style lang="scss"&gt;</code> blocks of a Vue SFC are now indexed, listed in the Library, counted in audit coverage, and benefit from hardcoded-value detection / completion / Alt+T / Go-to-declaration. Text-based implementation — no dependency on the Vue plugin — so it works on Community and Ultimate. Scanning is confined to inline style blocks, so <code>&lt;template&gt;</code> and <code>&lt;script&gt;</code> sections stay untouched.</li>

@@ -281,8 +281,9 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
             if (hit.kind == LiteralFinder.Kind.REFERENCE && !isBrokenRef) continue
 
             val expected = PropertyContext.detectAt(text, hit.startOffset)
+            val expectedRole = PropertyContext.detectRoleAt(text, hit.startOffset)
             val propertyName = PropertyContext.detectPropertyNameAt(text, hit.startOffset)
-            val suggestions = SuggestionEngine.findSuggestions(hit, valueIndex, tokens, expected)
+            val suggestions = SuggestionEngine.findSuggestions(hit, valueIndex, tokens, expected, expectedRole)
             val selector = SelectorContext.selectorAt(text, hit.startOffset)
             out += HardcodedRow(
                 literal = hit.replaceText,
