@@ -6,7 +6,7 @@
 
 Find, insert, swap and audit design tokens (SCSS · CSS · TS/JS) from inside IntelliJ — without ever leaving your editor.
 
-[![JetBrains Marketplace](https://img.shields.io/badge/JetBrains-Marketplace-orange?logo=jetbrains)](https://plugins.jetbrains.com/plugin/fr.fsh.tokendesigner)
+[![JetBrains Marketplace]([https://img.shields.io/badge/JetBrains-Marketplace-orange?logo=jetbrains)](https://plugins.jetbrains.com/plugin/fr.fsh.tokendesigner](https://plugins.jetbrains.com/plugin/31635-token-flow))
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![IntelliJ 2024.2+](https://img.shields.io/badge/IntelliJ-2024.2%2B-blue)](https://plugins.jetbrains.com/)
 
