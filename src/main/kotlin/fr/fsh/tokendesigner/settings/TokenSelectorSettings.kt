@@ -119,15 +119,20 @@ class TokenSelectorSettings : PersistentStateComponent<TokenSelectorSettings.Sta
         @JvmField var inspectVariableDeclarations: Boolean = false
         /**
          * When true (default), the Analyser and the Hardcoded Values panel
-         * recognise CSS custom properties that are *declared at runtime* by
-         * component code — Angular `[style.--var]` host bindings, React /
-         * Vue inline-style object keys, `element.style.setProperty('--var',
-         * …)` calls — and stop flagging `var(--var)` references as broken.
+         * recognise CSS custom properties declared *anywhere* in the
+         * codebase, not just in files registered as token sources. Two
+         * families are covered:
+         *  - runtime injection by component code (Angular `[style.--var]`,
+         *    React/Vue inline-style object keys, `setProperty('--var', …)`),
+         *  - contextual CSS declarations (`--var: value;` in any rule
+         *    body — the "CSS Custom Property API" pattern where a generic
+         *    component reads `var(--c, fallback)` and consumers set `--c`
+         *    locally in their own stylesheets).
          * A fallback expression alone (`var(--x, inherit)`) is **not**
          * enough to suppress the flag: a variable that resolves to nothing
-         * is still a broken reference even when a runtime default is
-         * supplied. Turn off to fall back to the pre-0.1.9 strict behaviour
-         * where every reference must point at a static declaration.
+         * anywhere in the project is still a broken reference. Turn off to
+         * fall back to the pre-0.1.9 strict behaviour where every reference
+         * must point at a declaration inside a registered token source.
          */
         @JvmField var detectRuntimeInjectedCssVars: Boolean = true
         /**
