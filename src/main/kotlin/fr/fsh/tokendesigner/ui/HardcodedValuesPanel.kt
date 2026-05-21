@@ -336,16 +336,24 @@ class HardcodedValuesPanel(private val project: Project) : SimpleToolWindowPanel
 
             val isBrokenRef = hit.kind == LiteralFinder.Kind.REFERENCE && run {
                 val name = DesignSystemAnalyzer.extractTokenName(hit.text)
-                if (name == null || name.startsWith("$") || name in ignoredNames) {
-                    false
-                } else {
-                    // Pass the configured external prefixes so framework-injected
-                    // CSS vars (PrimeNG `--p-…`, Ionic `--ion-…`) don't flag as
-                    // broken — there's no declaration in the tree, but they are
-                    // valid at runtime.
-                    DesignSystemAnalyzer.resolveReferenceMatch(
-                        name, tokenNames, ignoredNames, externalPrefixes,
-                    ) == null
+                when {
+                    name == null || name.startsWith("$") || name in ignoredNames -> false
+                    // Declared at runtime by component code (Angular host
+                    // bindings, React/Vue inline styles, setProperty calls).
+                    // A fallback expression on its own is *not* enough — a
+                    // missing variable behind `var(--x, inherit)` is still a
+                    // broken reference we want to surface.
+                    settings.detectRuntimeInjectedCssVars &&
+                        name in fr.fsh.tokendesigner.scanner.DynamicCssVarIndex
+                            .getInstance(project).get() -> false
+                    else ->
+                        // Pass the configured external prefixes so framework-injected
+                        // CSS vars (PrimeNG `--p-…`, Ionic `--ion-…`) don't flag as
+                        // broken — there's no declaration in the tree, but they are
+                        // valid at runtime.
+                        DesignSystemAnalyzer.resolveReferenceMatch(
+                            name, tokenNames, ignoredNames, externalPrefixes,
+                        ) == null
                 }
             }
 

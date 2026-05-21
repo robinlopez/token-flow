@@ -118,6 +118,19 @@ class TokenSelectorSettings : PersistentStateComponent<TokenSelectorSettings.Sta
          */
         @JvmField var inspectVariableDeclarations: Boolean = false
         /**
+         * When true (default), the Analyser and the Hardcoded Values panel
+         * recognise CSS custom properties that are *declared at runtime* by
+         * component code — Angular `[style.--var]` host bindings, React /
+         * Vue inline-style object keys, `element.style.setProperty('--var',
+         * …)` calls — and stop flagging `var(--var)` references as broken.
+         * A fallback expression alone (`var(--x, inherit)`) is **not**
+         * enough to suppress the flag: a variable that resolves to nothing
+         * is still a broken reference even when a runtime default is
+         * supplied. Turn off to fall back to the pre-0.1.9 strict behaviour
+         * where every reference must point at a static declaration.
+         */
+        @JvmField var detectRuntimeInjectedCssVars: Boolean = true
+        /**
          * One-shot dismissal flag for the framework-detection notification
          * (PrimeNG / Ionic / Material / …) that fires the first time the
          * plugin spots a known UI framework dependency. Persists across IDE
@@ -193,6 +206,10 @@ class TokenSelectorSettings : PersistentStateComponent<TokenSelectorSettings.Sta
     var inspectVariableDeclarations: Boolean
         get() = state.inspectVariableDeclarations
         set(value) { state.inspectVariableDeclarations = value }
+
+    var detectRuntimeInjectedCssVars: Boolean
+        get() = state.detectRuntimeInjectedCssVars
+        set(value) { state.detectRuntimeInjectedCssVars = value }
 
     var frameworkPrefixesNotified: Boolean
         get() = state.frameworkPrefixesNotified

@@ -2,6 +2,18 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/) — versionning [SemVer](https://semver.org/).
 
+## [0.1.9] — 2026-05-21
+
+### Added
+- **Runtime-injected CSS variables are no longer flagged as broken** : `var(--dynamic-width)` references are now recognised as valid when `--dynamic-width` is declared at runtime by component code rather than by a static stylesheet. A new project-level `DynamicCssVarIndex` service scans every `.ts`/`.tsx`/`.js`/`.jsx`/`.html`/`.vue` file for the usual injection patterns and caches the result against the IDE's PSI modification tracker — subsequent reads are free until the user edits something. Detected patterns :
+  - Angular host bindings : `[style.--var-name]`, `[attr.style.--var-name]`
+  - Angular template property syntax : `style.--var-name="…"`
+  - DOM API : `element.style.setProperty('--var-name', …)` (single, double or back-tick quotes)
+  - React inline styles : `<div style={{ '--var-name': value }}>`
+  - Vue `:style` shorthand : `:style="{ '--var-name': … }"`
+  Both the **Analyser** (broken references / reference-integrity score) and the **Hardcoded Values** panel honour the index. A fallback expression alone (`var(--x, inherit)`) is *not* enough — a variable that resolves to nothing is still a broken reference even when a runtime default is supplied. Closes [#16](https://github.com/robinlopez/token-flow/issues/16).
+- **New setting** : Settings → Token Flow → Analyser → "Recognise runtime-injected CSS variables". On by default; uncheck to fall back to the pre-0.1.9 strict behaviour where every reference must point at a static declaration.
+
 ## [0.1.8] — 2026-05-20
 
 ### Added
