@@ -61,13 +61,11 @@ Supported formats: SCSS variables, CSS Custom Properties, SCSS Maps, TS/JS prese
     ]]></description>
 
     <change-notes><![CDATA[
-<h3>0.1.9 — CSS variables declared outside token sources are no longer flagged as broken</h3>
+<h3>0.1.9 — Smarter broken-reference detection</h3>
 <ul>
-  <li><b>Runtime-injected CSS variables recognised</b>: <code>var(--dynamic-width)</code> is no longer marked as a broken reference when <code>--dynamic-width</code> is declared at runtime by component code. Detected across <code>.ts</code>/<code>.tsx</code>/<code>.js</code>/<code>.jsx</code>/<code>.html</code>/<code>.vue</code> — Angular host bindings (<code>[style.--var]</code>, <code>[attr.style.--var]</code>), React / Vue inline-style object keys (<code>'--var': value</code>), Vue <code>:style</code> shorthand, and DOM <code>setProperty('--var', …)</code> calls.</li>
-  <li><b>Contextual CSS overrides recognised</b>: the <i>CSS Custom Property API</i> pattern is now first-class — a generic component reading <code>var(--c, fallback)</code> with consumer components setting <code>--c</code> in their own stylesheets no longer trips broken-ref detection. Any bare <code>--name: value</code> declaration inside any <code>.css</code>/<code>.scss</code>/<code>.sass</code>/<code>.vue</code> rule body counts, even when the file isn't registered as a token source. BEM identifiers (<code>.block__elem--mod:hover</code>) are correctly ignored.</li>
-  <li><b>Strict on missing variables</b>: a fallback expression alone (<code>var(--x, inherit)</code>) is <i>not</i> enough — if <code>--x</code> is nowhere to be found in the project, it's still flagged as broken, even when a runtime default is supplied.</li>
-  <li><b>Cached scan</b>: the project-wide index is computed lazily and invalidated only when the IDE's PSI tracker bumps. No impact on subsequent Analyser runs or panel rebuilds.</li>
-  <li><b>New setting</b>: Settings → Token Flow → Analyser → "Recognise CSS variables declared outside token sources". On by default; uncheck to require every reference to point at a declaration inside a registered token source.</li>
+  <li><b>CSS variables declared outside token sources are no longer flagged as broken</b>: Token Flow now picks up two new families of declaration. <i>Runtime injection</i> from component code — Angular <code>[style.--var]</code> host bindings, React/Vue inline-style object keys, <code>setProperty('--var', …)</code> calls. <i>Contextual CSS overrides</i> — any <code>--name: value</code> declaration in any <code>.css</code>/<code>.scss</code>/<code>.sass</code>/<code>.vue</code> rule body, so the <i>CSS Custom Property API</i> pattern (generic component reads <code>var(--c, fallback)</code>, consumers set <code>--c</code> locally) just works.</li>
+  <li><b>Fallbacks no longer hide missing variables</b>: <code>var(--x, inherit)</code> is still flagged when <code>--x</code> is nowhere to be found — a runtime default is not a license to leave a dangling reference.</li>
+  <li><b>New setting</b>: Settings → Token Flow → Analyser → "Recognise CSS variables declared outside token sources". On by default; uncheck to revert to the strict pre-0.1.9 behaviour.</li>
 </ul>
 
 <h3>0.1.8 — Sharper token suggestions (tier &amp; role aware)</h3>
