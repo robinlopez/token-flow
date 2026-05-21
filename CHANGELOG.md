@@ -2,6 +2,15 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/) — versionning [SemVer](https://semver.org/).
 
+## [0.1.9] — 2026-05-21
+
+### Added
+- **CSS variables declared outside token sources are no longer flagged as broken** : Token Flow now recognises any `--name` declared anywhere in the codebase, not just in files registered as token sources. A new project-level `DynamicCssVarIndex` service walks `.ts`/`.tsx`/`.js`/`.jsx`/`.html`/`.vue`/`.css`/`.scss`/`.sass` once and caches the result against the IDE's PSI modification tracker — subsequent reads are free until the user edits something. Two families are detected :
+  - **Runtime injection by component code** — Angular host bindings (`[style.--var]`, `[attr.style.--var]`), Angular template property syntax (`style.--var="…"`), DOM `element.style.setProperty('--var', …)` calls (single / double / back-tick quotes), React inline styles (`<div style={{ '--var': value }}>`), Vue `:style` shorthand.
+  - **Contextual CSS overrides** — the *CSS Custom Property API* pattern where a generic component reads `var(--c, fallback)` and consumer components set `--c` locally in their own stylesheets. Any bare `--name: value` declaration inside a rule body counts (`:root`, host selectors, BEM-style consumer selectors, …). BEM identifiers like `.block__elem--mod:hover` are correctly ignored thanks to a negative lookbehind on alphanumerics.
+  Both the **Analyser** (broken references / reference-integrity score) and the **Hardcoded Values** panel honour the index. A fallback expression alone (`var(--x, inherit)`) is *not* enough — a variable that resolves to nothing anywhere in the project is still a broken reference. Closes [#16](https://github.com/robinlopez/token-flow/issues/16).
+- **New setting** : Settings → Token Flow → Analyser → "Recognise CSS variables declared outside token sources (runtime injection + contextual CSS rules)". On by default; uncheck to fall back to the pre-0.1.9 strict behaviour where every reference must point at a declaration inside a registered token source.
+
 ## [0.1.8] — 2026-05-20
 
 ### Added

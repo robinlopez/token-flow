@@ -90,6 +90,7 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
     private val valueCompletionCheckBox = JBCheckBox("Suggest matching tokens when typing a value (e.g. padding: 4…)")
     private val valueCompletionTriggerCombo = javax.swing.JComboBox(ValueCompletionTrigger.entries.toTypedArray())
     private val inspectVariableDeclarationsCheckBox = JBCheckBox("Detect hardcoded values in variable declarations (e.g. \$color: #fff)")
+    private val detectRuntimeInjectedCssVarsCheckBox = JBCheckBox("Recognise CSS variables declared outside token sources (runtime injection + contextual CSS rules)")
     private val iconVariantCombo = javax.swing.JComboBox(IconVariant.entries.toTypedArray()).apply {
         // List rows show a 48px preview; the closed combo (index == -1) keeps a
         // compact 16px size so it doesn't blow up the form layout.
@@ -215,6 +216,7 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
         if (saved.valueCompletionMinChars != (valueCompletionTriggerCombo.selectedItem as ValueCompletionTrigger).minChars) return true
         if (saved.iconVariantName != (iconVariantCombo.selectedItem as IconVariant).name) return true
         if (saved.inspectVariableDeclarations != inspectVariableDeclarationsCheckBox.isSelected) return true
+        if (saved.detectRuntimeInjectedCssVars != detectRuntimeInjectedCssVarsCheckBox.isSelected) return true
         
         val current = currentScopes()
         if (saved.scopes.size != current.size) return true
@@ -242,6 +244,7 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
         val iconChanged = s.iconVariantName != newIcon
         s.iconVariantName = newIcon
         s.inspectVariableDeclarations = inspectVariableDeclarationsCheckBox.isSelected
+        s.detectRuntimeInjectedCssVars = detectRuntimeInjectedCssVarsCheckBox.isSelected
         if (iconChanged) s.fireIconChanged()
         TokenIndex.getInstance(project).invalidate()
         // Fire AFTER the index has been invalidated so listeners that re-fetch
@@ -266,6 +269,7 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
         valueCompletionTriggerCombo.isEnabled = s.valueCompletionEnabled
         iconVariantCombo.selectedItem = IconVariant.fromName(s.iconVariantName)
         inspectVariableDeclarationsCheckBox.isSelected = s.inspectVariableDeclarations
+        detectRuntimeInjectedCssVarsCheckBox.isSelected = s.detectRuntimeInjectedCssVars
     }
 
     override fun disposeUIResources() {
@@ -797,6 +801,7 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
 
     private fun buildAnalyserTab(): JComponent {
         val sectionHardcoded = sectionLabel("Hardcoded values detection")
+        val sectionBrokenRefs = sectionLabel("Broken references")
 
         return JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
@@ -808,6 +813,16 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
                 toolTipText = "When unchecked (default), literal values assigned to variables are ignored, as they are usually the tokens' own definitions."
             })
             add(htmlMultiLine("<span style='color:gray'>Uncheck this to avoid flagging your own token definitions in SCSS/CSS variable files.</span>").apply {
+                border = JBUI.Borders.emptyLeft(26)
+            })
+
+            add(verticalSpacer())
+            add(sectionBrokenRefs)
+            add(detectRuntimeInjectedCssVarsCheckBox.apply {
+                alignmentX = java.awt.Component.LEFT_ALIGNMENT
+                toolTipText = "When checked (default), Token Flow recognises CSS variables that are declared anywhere in the codebase — not just in registered token source files. Two patterns are detected: (1) runtime injection from component code (Angular [style.--x], React/Vue inline styles, setProperty calls in .ts/.tsx/.js/.jsx/.html/.vue) and (2) contextual CSS overrides (--name: value declarations in any .css/.scss/.sass/.vue rule, e.g. consumer components customising a generic component's CSS API). A fallback expression alone (var(--x, inherit)) is NOT enough — a variable that resolves to nothing anywhere in the project is still flagged."
+            })
+            add(htmlMultiLine("<span style='color:gray'>Covers Angular host bindings, React/Vue inline styles, <code>setProperty</code>, and the <i>CSS Custom Property API</i> pattern (generic component reads <code>var(--c, …)</code>, consumers set <code>--c</code> locally). A <code>var(--x, fallback)</code> with no matching declaration anywhere in the project is still reported.</span>").apply {
                 border = JBUI.Borders.emptyLeft(26)
             })
 

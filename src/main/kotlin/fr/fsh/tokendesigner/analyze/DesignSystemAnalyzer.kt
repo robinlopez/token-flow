@@ -13,6 +13,7 @@ import fr.fsh.tokendesigner.inspection.SuggestionEngine
 import fr.fsh.tokendesigner.inspection.TokenValueIndex
 import fr.fsh.tokendesigner.model.DesignToken
 import fr.fsh.tokendesigner.model.TokenCategory
+import fr.fsh.tokendesigner.scanner.DynamicCssVarIndex
 import fr.fsh.tokendesigner.scanner.TokenCategorizer
 import fr.fsh.tokendesigner.scanner.TokenIndex
 import fr.fsh.tokendesigner.settings.ScopeResolver
@@ -284,10 +285,20 @@ class DesignSystemAnalyzer(private val project: Project) {
         val tokenNames = tokens.map { it.name }.toSet()
         val settings = TokenSelectorSettings.getInstance(project)
         val inspectVariableDeclarations = settings.inspectVariableDeclarations
+        val detectRuntimeInjected = settings.detectRuntimeInjectedCssVars
         // Union of external prefixes across every scope active for the chosen
         // analysis target. `var(--p-foo)` matched by any of them is treated as
         // a known-external reference and counted as tokenised (not broken).
         val externalPrefixes = activeScopes.flatMap { it.externalPrefixes }.distinct()
+        // CSS vars declared at runtime by component code (Angular host
+        // bindings, React/Vue inline styles, `setProperty`). Pulled from the
+        // cached project-wide index so .html templates outside [COVERAGE_EXTS]
+        // are covered too.
+        val dynamicVarNames: Set<String> = if (detectRuntimeInjected) {
+            DynamicCssVarIndex.getInstance(project).get()
+        } else {
+            emptySet()
+        }
 
         for (vf in files) {
             val text = try {
@@ -326,13 +337,20 @@ class DesignSystemAnalyzer(private val project: Project) {
                         // referenced (no canonical token to point at).
                         return@forEach
                     }
+                    // Declared at runtime by component code (Angular host
+                    // binding, React/Vue inline style, setProperty). Count as
+                    // referenced so an owning token won't show up as unused.
+                    if (name in dynamicVarNames) {
+                        referenced += name
+                        return@forEach
+                    }
                     val resolved = resolveReferenceMatch(name, tokenNames, ignoredNames, externalPrefixes)
                     if (resolved == null) {
                         broken += BrokenReference(
                             name = hit.text,
                             filePath = vf.path,
                             offset = hit.startOffset,
-                            line = lineFor(text, hit.startOffset)
+                            line = lineFor(text, hit.startOffset),
                         )
                     } else {
                         referenced += resolved
@@ -340,6 +358,7 @@ class DesignSystemAnalyzer(private val project: Project) {
                 }
             }
         }
+
 
         val ratio = if (tokenised + literal == 0) 1.0
         else tokenised.toDouble() / (tokenised + literal)

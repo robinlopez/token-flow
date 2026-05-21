@@ -118,6 +118,24 @@ class TokenSelectorSettings : PersistentStateComponent<TokenSelectorSettings.Sta
          */
         @JvmField var inspectVariableDeclarations: Boolean = false
         /**
+         * When true (default), the Analyser and the Hardcoded Values panel
+         * recognise CSS custom properties declared *anywhere* in the
+         * codebase, not just in files registered as token sources. Two
+         * families are covered:
+         *  - runtime injection by component code (Angular `[style.--var]`,
+         *    React/Vue inline-style object keys, `setProperty('--var', …)`),
+         *  - contextual CSS declarations (`--var: value;` in any rule
+         *    body — the "CSS Custom Property API" pattern where a generic
+         *    component reads `var(--c, fallback)` and consumers set `--c`
+         *    locally in their own stylesheets).
+         * A fallback expression alone (`var(--x, inherit)`) is **not**
+         * enough to suppress the flag: a variable that resolves to nothing
+         * anywhere in the project is still a broken reference. Turn off to
+         * fall back to the pre-0.1.9 strict behaviour where every reference
+         * must point at a declaration inside a registered token source.
+         */
+        @JvmField var detectRuntimeInjectedCssVars: Boolean = true
+        /**
          * One-shot dismissal flag for the framework-detection notification
          * (PrimeNG / Ionic / Material / …) that fires the first time the
          * plugin spots a known UI framework dependency. Persists across IDE
@@ -193,6 +211,10 @@ class TokenSelectorSettings : PersistentStateComponent<TokenSelectorSettings.Sta
     var inspectVariableDeclarations: Boolean
         get() = state.inspectVariableDeclarations
         set(value) { state.inspectVariableDeclarations = value }
+
+    var detectRuntimeInjectedCssVars: Boolean
+        get() = state.detectRuntimeInjectedCssVars
+        set(value) { state.detectRuntimeInjectedCssVars = value }
 
     var frameworkPrefixesNotified: Boolean
         get() = state.frameworkPrefixesNotified
