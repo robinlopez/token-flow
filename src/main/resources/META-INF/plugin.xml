@@ -61,6 +61,13 @@ Supported formats: SCSS variables, CSS Custom Properties, SCSS Maps, TS/JS prese
     ]]></description>
 
     <change-notes><![CDATA[
+<h3>0.2.0 — Discover where contextual CSS variables are declared</h3>
+<ul>
+  <li><b>Alt+T on a contextually-declared CSS variable now lists its declaration sites</b>: instead of the historical "No alternatives found" dead-end, the popup shows every place the variable is set across the project — file name, line, raw value, innermost CSS selector, plus a colour swatch when the value parses as a colour. Clicking a row opens the file at the right offset. Covers consumer overrides (<code>--c: value</code> in any stylesheet), Angular host bindings (<code>[style.--c]: 'expr'</code>), React/Vue inline styles, and DOM <code>setProperty</code> calls.</li>
+  <li><b>Static-first ordering</b>: static CSS declarations are listed before runtime injections so the most actionable sites (the ones that expose a concrete value) come first.</li>
+  <li><b>Filterable + navigable</b>: the popup honours the standard chooser-builder shortcuts — type to filter by selector / value / path, arrow keys to move, Enter to jump.</li>
+</ul>
+
 <h3>0.1.9 — Smarter broken-reference detection</h3>
 <ul>
   <li><b>CSS variables declared outside token sources are no longer flagged as broken</b>: Token Flow now picks up two new families of declaration. <i>Runtime injection</i> from component code — Angular <code>[style.--var]</code> host bindings, React/Vue inline-style object keys, <code>setProperty('--var', …)</code> calls. <i>Contextual CSS overrides</i> — any <code>--name: value</code> declaration in any <code>.css</code>/<code>.scss</code>/<code>.sass</code>/<code>.vue</code> rule body, so the <i>CSS Custom Property API</i> pattern (generic component reads <code>var(--c, fallback)</code>, consumers set <code>--c</code> locally) just works.</li>

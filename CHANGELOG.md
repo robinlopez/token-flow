@@ -2,6 +2,13 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/) — versionning [SemVer](https://semver.org/).
 
+## [0.2.0] — 2026-05-22
+
+### Added
+- **Alt+T on a contextually-declared CSS variable lists its declaration sites** : when the caret sits on a `var(--c)` whose `--c` is declared *outside* the registered token sources (consumer override, Angular host binding, React/Vue inline style, vanilla `setProperty` call), Alt+T now surfaces a navigable list of every declaration site instead of the historical "No alternatives found." message. Each row shows the innermost CSS selector (`<runtime>` for runtime injection), the raw value as written, the project-relative file path and 1-based line number, and a colour swatch when the value parses as a colour (`ColorParser`). Clicking a row opens the file at the exact offset via `OpenFileDescriptor`. Static CSS declarations are listed before runtime occurrences so the most actionable sites (concrete values) come first. The popup honours `JBPopupFactory.createPopupChooserBuilder` semantics — type-to-filter by selector / value / path, arrow keys to move, Enter to jump, Esc to dismiss.
+- **`DynamicCssVarIndex` now stores full occurrences** : the project-wide index introduced in 0.1.9 was reshaped from `Set<String>` to `Map<String, List<CssVarOccurrence>>`. Each `CssVarOccurrence` carries the variable name, raw value, file path, byte offset, 1-based line, innermost selector (CSS only) and a `isRuntime` flag. Broken-ref detection still reads the `keys` view via `get()` so the 0.1.9 callers are untouched — no behaviour change there. Innermost selector is best-effort : a backwards walk over balanced `{}` from the declaration offset, returning `null` for top-level declarations / malformed input / Sass indent files. Nested SCSS rules return the innermost selector only — walking the full parent chain would require a real parser, and the innermost is enough to identify the declaration at a glance.
+- **Pre-warmed lookup** : `TokenAlternativesShower.show` now reads `occurrencesOf(name)` inside its existing `Task.Backgroundable`, so the EDT branch that displays the popup never pays the first-walk cost. The lookup is no-op when the hit's name doesn't start with `--`.
+
 ## [0.1.9] — 2026-05-21
 
 ### Added
