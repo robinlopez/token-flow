@@ -48,6 +48,7 @@ Catégorisation automatique : `COLOR`, `SPACING`, `TYPOGRAPHY`, `RADIUS`, `SHADO
 - Curseur sur un path Style-Dictionary (`'{a.b.c}'`, `dt('a.b')`) ou une property-access runtime (`colors.PRIMARY_500`, `theme.radius.sm`) → mêmes alternatives.
 - Curseur sur un **helper call** (`spacing(0.5)`, `radius(2)`) → popup *scale* spécifique : variants synthétiques `spacing(0.25)` … `spacing(10)` calculés à partir de l'unité du helper, valeur courante pré-sélectionnée (flèches haut/bas pour naviguer la scale).
 - Curseur sur un littéral hardcodé (`#fff`, `12px`, `200ms`, ou `34` en JS/TS) → liste de tokens correspondants ou approchants.
+- Curseur sur une **CSS variable contextuelle** (déclarée hors des token sources : override de consumer, host binding Angular, inline style React/Vue, `setProperty`) → liste **navigable des sites de déclaration**. Chaque ligne montre le sélecteur CSS interne (ou `[runtime]`), la valeur brute, le chemin `relative/path.scss:42`, et un swatch couleur quand la valeur parse. Clic → ouvre le fichier à l'offset exact. Tri : déclarations statiques d'abord, puis runtime. Type-to-filter sur selector / value / path.
 - Sélection → remplace dans le code (write action).
 
 ## 5. Inspection « Hardcoded value matches a design token »

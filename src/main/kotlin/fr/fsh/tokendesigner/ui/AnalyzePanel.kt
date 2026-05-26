@@ -19,11 +19,13 @@ import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.JBFont
 import com.intellij.util.ui.JBUI
+import fr.fsh.tokendesigner.analyze.Ambiguity
 import fr.fsh.tokendesigner.analyze.AnalysisReport
 import fr.fsh.tokendesigner.analyze.DesignSystemAnalyzer
 import fr.fsh.tokendesigner.analyze.DuplicateCluster
 import fr.fsh.tokendesigner.analyze.HardcodedCluster
 import fr.fsh.tokendesigner.analyze.HardcodedOccurrence
+import fr.fsh.tokendesigner.analyze.HardcodedValue
 import fr.fsh.tokendesigner.analyze.Incoherence
 import fr.fsh.tokendesigner.analyze.SubScore
 import fr.fsh.tokendesigner.analyze.TokenSourceUsage
@@ -133,6 +135,19 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
      */
     private data class ScopeChoice(val label: String, val representative: VirtualFile?)
 
+    /**
+     * Stable identifier for the currently-selected scope choice, used to
+     * preserve the user's selection across combo rebuilds (settings change,
+     * active-editor switch). Without this, the "Active editor (xxx)" entry's
+     * label changes with each file the user opens — by the time we rebuild,
+     * label-based matching breaks and the selection drifts back to whichever
+     * scope `rebuildScopeCombo` thinks is "deepest" for the new file.
+     *  - "ALL"     → "All project"
+     *  - "ACTIVE"  → the dynamic "Active editor (…)" entry
+     *  - "Scope: <name>" → a named configured scope
+     */
+    private var stickyScopeKey: String? = null
+
     private val scopeCombo = JComboBox<ScopeChoice>().apply {
         renderer = object : javax.swing.DefaultListCellRenderer() {
             override fun getListCellRendererComponent(
@@ -147,7 +162,18 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
                 return c
             }
         }
-        addActionListener { /* selection persisted at run-time */ }
+        addActionListener {
+            // Capture the user's explicit pick so the next rebuild restores it
+            // instead of falling back to the active-editor heuristic.
+            val choice = selectedItem as? ScopeChoice ?: return@addActionListener
+            stickyScopeKey = scopeChoiceKey(choice)
+        }
+    }
+
+    private fun scopeChoiceKey(choice: ScopeChoice): String = when {
+        choice.label == "All project" -> "ALL"
+        choice.label.startsWith("Active editor") -> "ACTIVE"
+        else -> choice.label  // scope names are stable
     }
 
     /**
@@ -242,6 +268,18 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
         }
         scopeCombo.model = javax.swing.DefaultComboBoxModel(items.toTypedArray())
 
+        // Selection priority:
+        //  1. The user's last explicit pick (stickyScopeKey) — so the combo
+        //     stays put as the user navigates between files.
+        //  2. On first build (no sticky yet) and only then, fall back to the
+        //     historical active-editor heuristic so the panel still opens on
+        //     something useful out of the box.
+        val sticky = stickyScopeKey
+        if (sticky != null) {
+            val matchIdx = items.indexOfFirst { scopeChoiceKey(it) == sticky }
+            scopeCombo.selectedIndex = if (matchIdx >= 0) matchIdx else 0
+            return
+        }
         if (activeFile != null) {
             val activeScopes = ScopeResolver.activeScopesFor(project, activeFile)
             val deepest = activeScopes.lastOrNull { !it.isCommon }
@@ -361,6 +399,13 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
         ), MAX_CONTENT_WIDTH))
         content.add(verticalSpacer(10))
         content.add(capWidth(CollapsibleSection(
+            title = "Hardcoded values",
+            count = report.hardcodedValues.size,
+            helpText = HARDCODED_VALUES_HELP,
+            body = hardcodedValuesBody(report.hardcodedValues),
+        ), MAX_CONTENT_WIDTH))
+        content.add(verticalSpacer(10))
+        content.add(capWidth(CollapsibleSection(
             title = "Broken references",
             count = report.brokenReferences.size,
             helpText = BROKEN_REF_HELP,
@@ -389,6 +434,14 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
             count = report.incoherences.size,
             helpText = INCOHERENCE_HELP,
             body = incoherenceBody(report.incoherences),
+            initiallyCollapsed = true,
+        ), MAX_CONTENT_WIDTH))
+        content.add(verticalSpacer(10))
+        content.add(capWidth(CollapsibleSection(
+            title = "Ambiguous tokens",
+            count = report.ambiguities.size,
+            helpText = AMBIGUITY_HELP,
+            body = ambiguityBody(report.ambiguities),
             initiallyCollapsed = true,
         ), MAX_CONTENT_WIDTH))
         content.add(verticalSpacer(10))
@@ -514,6 +567,33 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
         return rowPanel(text, locate = { navigateTo(row.token.filePath, row.token.offset) })
     }
 
+    private fun ambiguityBody(rows: List<Ambiguity>): JComponent {
+        if (rows.isEmpty()) return emptyState("No ambiguous token names detected.")
+        val panel = verticalList()
+        renderTruncatedList(panel, rows, limit = 50) { ambiguityRow(it) }
+        return panel
+    }
+
+    private fun ambiguityRow(row: Ambiguity): JComponent {
+        val text = "<html>" +
+            "<b>${escape(row.token.name)}</b>" +
+            "&nbsp;<span style='color:#888;font-size:90%'>= ${escape(row.token.resolvedValue.take(40))}</span>" +
+            "<br/><span style='color:#888;font-style:italic'>${escape(row.reason)}</span>" +
+            "<br/><span style='color:#1A73E8'>💡 ${escape(row.alternativeInterpretation)}</span>" +
+            "</html>"
+        val panel = JPanel(BorderLayout()).apply {
+            alignmentX = Component.LEFT_ALIGNMENT
+            border = BorderFactory.createCompoundBorder(
+                JBUI.Borders.customLineBottom(JBColor.border()),
+                JBUI.Borders.empty(8, 4),
+            )
+            isOpaque = false
+        }
+        panel.add(JBLabel(text), BorderLayout.CENTER)
+        panel.add(targetButton("Open declaration") { navigateTo(row.token.filePath, row.token.offset) }, BorderLayout.EAST)
+        return panel
+    }
+
     private fun unusedBody(tokens: List<DesignToken>): JComponent {
         if (tokens.isEmpty()) return emptyState("No unused tokens found.")
         val panel = verticalList()
@@ -593,6 +673,98 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
             border = JBUI.Borders.empty(0, 28, 8, 4)
             isVisible = false
             for (occ in cluster.occurrences) add(occurrenceTableRow(occ))
+        }
+
+        header.addMouseListener(object : java.awt.event.MouseAdapter() {
+            override fun mouseClicked(e: java.awt.event.MouseEvent) {
+                tableBody.isVisible = !tableBody.isVisible
+                chevron.icon = if (tableBody.isVisible) AllIcons.General.ArrowDown
+                else AllIcons.General.ArrowRight
+                container.revalidate()
+                container.repaint()
+            }
+        })
+
+        container.add(header, BorderLayout.NORTH)
+        container.add(tableBody, BorderLayout.CENTER)
+        return container
+    }
+
+    private fun hardcodedValuesBody(rows: List<HardcodedValue>): JComponent {
+        if (rows.isEmpty()) return emptyState("No hardcoded values matching an existing token found.")
+        val panel = verticalList()
+        renderTruncatedList(panel, rows, limit = 50) { hardcodedValueRow(it) }
+        return panel
+    }
+
+    /**
+     * One collapsible row per (literal, category) group. Header carries the
+     * value, its detected property family, occurrence count and the
+     * highest-ranked existing token (via the Tier/Role suggestion engine).
+     * Click expands the per-occurrence list — same pattern as the cluster
+     * accordion above, kept visually consistent.
+     */
+    private fun hardcodedValueRow(row: HardcodedValue): JComponent {
+        val container = JPanel(BorderLayout()).apply {
+            alignmentX = Component.LEFT_ALIGNMENT
+            isOpaque = false
+            border = JBUI.Borders.customLineBottom(JBColor.border())
+        }
+        val chevron = JLabel(AllIcons.General.ArrowRight).apply {
+            border = JBUI.Borders.empty(0, 4, 0, 8)
+        }
+        val categoryLabel = row.category?.name?.lowercase()?.replaceFirstChar { it.uppercase() } ?: "Other"
+        val suggestion = row.suggestedToken
+
+        // Two-line header layout — keeps each line short so a long token name
+        // never wraps over the chevron / button column regardless of tool-window
+        // width. Top line: literal + category + count. Bottom line: suggestion
+        // (gray). Tooltip carries the full unstyled text for accessibility.
+        val titleText = "${row.literal}  —  [$categoryLabel]  ·  ${row.occurrences.size} occurrence(s)"
+        val titleLabel = JBLabel(
+            "<html><nobr><code>${escape(row.literal)}</code> &nbsp;—&nbsp; " +
+                "<span style='color:#888'>[${escape(categoryLabel)}]</span> &nbsp;·&nbsp; " +
+                "<b>${row.occurrences.size}</b> occurrence(s)</nobr></html>"
+        ).apply { toolTipText = titleText }
+        val suggestionLabel = suggestion?.let {
+            val tip = "Suggested token: ${it.name}"
+            JBLabel(
+                "<html><nobr><span style='color:#1A73E8'>→ suggests <code>${escape(it.name)}</code></span></nobr></html>"
+            ).apply {
+                toolTipText = tip
+                border = JBUI.Borders.emptyTop(2)
+                font = JBFont.small()
+            }
+        }
+
+        val textColumn = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            isOpaque = false
+            alignmentY = Component.CENTER_ALIGNMENT
+            add(titleLabel)
+            if (suggestionLabel != null) add(suggestionLabel)
+        }
+
+        val header = JPanel(BorderLayout()).apply {
+            isOpaque = false
+            border = JBUI.Borders.empty(8, 4)
+            cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+            add(chevron, BorderLayout.WEST)
+            add(textColumn, BorderLayout.CENTER)
+            if (suggestion != null) {
+                add(targetButton("Open suggested token") {
+                    navigateTo(suggestion.filePath, suggestion.offset)
+                }, BorderLayout.EAST)
+            }
+        }
+
+        val tableBody = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            alignmentX = Component.LEFT_ALIGNMENT
+            isOpaque = false
+            border = JBUI.Borders.empty(0, 28, 8, 4)
+            isVisible = false
+            for (occ in row.occurrences) add(occurrenceTableRow(occ))
         }
 
         header.addMouseListener(object : java.awt.event.MouseAdapter() {
@@ -802,12 +974,24 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
         const val INCOHERENCE_HELP =
             "Tokens whose name suggests one category but whose value implies another. " +
                 "Click the target icon to jump to the declaration."
+        const val AMBIGUITY_HELP =
+            "Tokens that are not necessarily wrong, but whose name is ambiguous: it could " +
+                "plausibly refer to more than one type of value. These are informational notices " +
+                "to help you improve naming clarity in your design system. " +
+                "Click the target icon to jump to the declaration."
         const val DUPLICATE_HELP =
             "Tokens declared separately but resolving to the same value. " +
                 "Suggestion: keep the shortest/most semantic name and alias the others."
         const val HARDCODED_HELP =
-            "Literal values repeated across the codebase. Click a row to expand " +
-                "the per-occurrence table and jump to any hit."
+            "Literal values repeated across the codebase with NO matching token. " +
+                "These are opportunities to create a new token in your design system. " +
+                "Click a row to expand the per-occurrence table and jump to any hit."
+        const val HARDCODED_VALUES_HELP =
+            "Literal values whose equivalent already exists as a token. Pure " +
+                "actionable debt — replace each hit with the suggested token. " +
+                "Grouped by (value + property family) so the same value used for " +
+                "two distinct properties (e.g. 12px padding vs 12px font-size) " +
+                "shows up separately with its own suggestion."
         const val COVERAGE_HELP =
             "How much of each token-source file is actually referenced. Low " +
                 "ratios = catalog bloat or dead tokens. Hover the filename for " +

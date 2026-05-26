@@ -15,8 +15,10 @@ data class AnalysisReport(
     val grade: String,                           // A / B / C / D / F derived from [score]
     val subScores: List<SubScore>,               // axis-by-axis breakdown
     val incoherences: List<Incoherence>,
+    val ambiguities: List<Ambiguity>,            // tokens whose naming is ambiguous (informational)
     val duplicateClusters: List<DuplicateCluster>,
     val hardcodedClusters: List<HardcodedCluster>,
+    val hardcodedValues: List<HardcodedValue>,
     val coverage: Coverage,
     val brokenReferences: List<BrokenReference>, // references (var, $) that don't exist
     val unusedTokens: List<DesignToken>,         // declared but never referenced anywhere
@@ -37,7 +39,8 @@ enum class Axis(val displayName: String) {
     SEMANTIC_COHERENCE("Semantic coherence"),
     USAGE_COVERAGE("Usage coverage"),
     DUPLICATION("Duplication"),
-    HARDCODED_PRESSURE("Hardcoded pressure"),
+    HARDCODED_OPPORTUNITY("Hardcoded opportunity"),
+    HARDCODED_DEBT("Hardcoded debt"),
     REFERENCE_INTEGRITY("Reference integrity"),
 }
 
@@ -47,6 +50,17 @@ data class Incoherence(
     val expectedCategory: TokenCategory,         // what the *name* implies
     val actualCategory: TokenCategory,           // what the *value* implies
     val rationale: String,                       // human-friendly explanation for the row
+)
+
+/**
+ * A token whose name is **ambiguous** — not outright wrong, but it could
+ * plausibly map to more than one value family depending on the team's
+ * convention. Surfaced as an informational notice, not an error.
+ */
+data class Ambiguity(
+    val token: DesignToken,
+    val reason: String,                          // why the name is considered ambiguous
+    val alternativeInterpretation: String,       // the other plausible reading of the name
 )
 
 /** A group of tokens sharing the same resolved value — i.e. duplicates. */
@@ -68,6 +82,22 @@ data class HardcodedCluster(
     val occurrences: List<HardcodedOccurrence>,
     /** Existing token whose value matches this literal, if any. */
     val matchingTokenName: String?,
+)
+
+/**
+ * A literal repeated across the codebase that **already has** a matching
+ * token in the design system. Actionable technical debt — a quick-fix is
+ * available without modifying the DS sources.
+ *
+ * Grouped by `(literal + category)` so the same value used in two distinct
+ * property families (e.g. `12px` for padding vs `12px` for font-size) shows
+ * up as two separate rows with their own most-relevant suggestion.
+ */
+data class HardcodedValue(
+    val literal: String,
+    val category: TokenCategory?,
+    val suggestedToken: DesignToken?,
+    val occurrences: List<HardcodedOccurrence>,
 )
 
 data class HardcodedOccurrence(

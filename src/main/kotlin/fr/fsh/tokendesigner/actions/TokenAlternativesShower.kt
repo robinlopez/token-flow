@@ -45,9 +45,19 @@ object TokenAlternativesShower {
                 indicator.isIndeterminate = true
                 val file = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance().getFile(editor.document)
                 val tokens = readAction { TokenIndex.getInstance(project).get(file) }
+                // Pre-warm the contextual-declarations index on the
+                // background thread so the EDT branch below can read it
+                // without paying the first-walk cost.
+                val occurrences: List<fr.fsh.tokendesigner.scanner.CssVarOccurrence> =
+                    if (hit.name.startsWith("--")) {
+                        readAction {
+                            fr.fsh.tokendesigner.scanner.DynamicCssVarIndex
+                                .getInstance(project).occurrencesOf(hit.name)
+                        }
+                    } else emptyList()
                 ApplicationManager.getApplication().invokeLater {
                     if (editor.isDisposed) return@invokeLater
-                    showPopup(project, editor, hit, tokens, anchorScreenLocation)
+                    showPopup(project, editor, hit, tokens, occurrences, anchorScreenLocation)
                 }
             }
         }.queue()
@@ -58,6 +68,7 @@ object TokenAlternativesShower {
         editor: Editor,
         hit: TokenLocator.Hit,
         all: List<DesignToken>,
+        contextualOccurrences: List<fr.fsh.tokendesigner.scanner.CssVarOccurrence>,
         anchorScreenLocation: Point?,
     ) {
         // Helper call (`spacing(0.5)`, `radius(2)`): synthesise the scale of
@@ -91,6 +102,21 @@ object TokenAlternativesShower {
             all.filter { it.name.startsWith(prefix) }
         }
         if (candidates.isEmpty()) {
+            // No canonical token to alternate with — but the name might
+            // still be declared *contextually* (Angular host bindings,
+            // React/Vue inline styles, consumer-component CSS overrides).
+            // Surface those declarations as a navigable list instead of
+            // the historical "no alternatives" dead-end.
+            if (contextualOccurrences.isNotEmpty()) {
+                fr.fsh.tokendesigner.ui.CssVarDeclarationsPopup.show(
+                    project = project,
+                    varName = hit.name,
+                    occurrences = contextualOccurrences,
+                    anchorScreenLocation = anchorScreenLocation,
+                    editor = editor,
+                ).also { activePopup.set(it) }
+                return
+            }
             JBPopupFactory.getInstance()
                 .createMessage("No alternatives found for ${hit.name}.")
                 .showCenteredInCurrentWindow(project)

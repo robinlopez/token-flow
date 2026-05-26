@@ -12,6 +12,7 @@ import fr.fsh.tokendesigner.inspection.PropertyContext
 import fr.fsh.tokendesigner.inspection.SuggestionEngine
 import fr.fsh.tokendesigner.inspection.TokenValueIndex
 import fr.fsh.tokendesigner.model.DesignToken
+import fr.fsh.tokendesigner.analyze.Ambiguity
 import fr.fsh.tokendesigner.model.TokenCategory
 import fr.fsh.tokendesigner.scanner.DynamicCssVarIndex
 import fr.fsh.tokendesigner.scanner.TokenCategorizer
@@ -34,13 +35,16 @@ class DesignSystemAnalyzer(private val project: Project) {
         val ignoredNames = collectIgnoredNames(scopeFile)
 
         val incoherences = detectIncoherences(tokens)
+        val ambiguities = detectAmbiguities(tokens, incoherences)
         val duplicates = detectDuplicates(tokens)
         val coverage = computeCoverage(tokens, scopeFile, ignoredNames)
         val broken = coverage.brokenReferences
-        val hardcoded = collectHardcodedClusters(tokens, coverage.scannedFiles, ignoredNames)
+        val hardcodedScan = collectHardcodedScan(tokens, coverage.scannedFiles, ignoredNames)
+        val hardcoded = hardcodedScan.clusters
+        val hardcodedValues = hardcodedScan.values
         val unused = tokens.filter { it.name !in coverage.referencedNames }.sortedBy { it.name }
 
-        val subScores = computeSubScores(tokens, incoherences, duplicates, coverage, hardcoded)
+        val subScores = computeSubScores(tokens, incoherences, duplicates, coverage, hardcoded, hardcodedValues)
         val score = subScores.weightedAverage()
         val grade = grade(score)
 
@@ -49,8 +53,10 @@ class DesignSystemAnalyzer(private val project: Project) {
             grade = grade,
             subScores = subScores,
             incoherences = incoherences,
+            ambiguities = ambiguities,
             duplicateClusters = duplicates,
             hardcodedClusters = hardcoded,
+            hardcodedValues = hardcodedValues,
             coverage = coverage.report,
             brokenReferences = broken,
             unusedTokens = unused,
@@ -95,6 +101,103 @@ class DesignSystemAnalyzer(private val project: Project) {
                 actualCategory = actual.tokenCategoryHint,
                 rationale = describeMismatch(expected, actual, raw),
             )
+        }
+        return out.sortedBy { it.token.name }
+    }
+
+    /**
+     * Detects tokens that are not outright incoherent but whose **name is
+     * ambiguous**: it maps plausibly to more than one value family, and the
+     * actual resolved value matches the *less obvious* interpretation.
+     *
+     * Examples:
+     *  - `--text-default: #45566` → `text` commonly signals typography (size,
+     *    weight), but a hex colour is also valid as a text colour — ambiguous.
+     *  - `--icon-primary: 24px` → `icon` usually means a colour or an asset
+     *    reference, a raw length is unexpected.
+     *
+     * Tokens that already appear in [incoherences] are excluded — they have a
+     * stronger signal and are surfaced there instead.
+     */
+    private fun detectAmbiguities(
+        tokens: List<DesignToken>,
+        incoherences: List<Incoherence>,
+    ): List<Ambiguity> {
+        val incoherentNames = incoherences.map { it.token.name }.toSet()
+        val out = mutableListOf<Ambiguity>()
+
+        for (token in tokens) {
+            if (token.name in incoherentNames) continue
+            val raw = token.resolvedValue.trim()
+            if (raw.isBlank() || isUnresolvedReference(raw) || isCssKeyword(raw)) continue
+            val family = valueFamily(raw) ?: continue
+
+            val n = token.name.lowercase().trimStart('-', '$')
+
+            // ── Rule 1: text/label/caption with a colour value ──────────────
+            // These words can suggest typography (size, font) OR a text/label
+            // colour — both are valid, which is exactly the ambiguity.
+            // Guard: if the name also contains a word that unambiguously
+            // signals colour intent (surface, foreground, disabled, hover…)
+            // then the token is NOT ambiguous — its intent is obvious.
+            if (TYPO_AMBIGUOUS_NAME_RE.containsMatchIn(n)
+                && family == ValueFamily.COLOR
+                && !COLOR_NAME_RE.containsMatchIn(n)
+                && !COLOR_CONTEXT_ESCAPE_RE.containsMatchIn(n)
+            ) {
+                out += Ambiguity(
+                    token = token,
+                    reason = "The name suggests a typography token (font size, weight, family) " +
+                        "but the value is a colour (`${raw.take(30)}`). " +
+                        "If this is intentional (e.g. a text colour), consider renaming to " +
+                        "`--text-color-*` or `--*-color` to make the intent explicit.",
+                    alternativeInterpretation = "Could be a text-colour token — valid, but the name " +
+                        "does not make the colour intent obvious.",
+                )
+                continue
+            }
+
+            // ── Rule 2: icon/glyph with a raw length value ───────────────────
+            // `--icon-primary` or `--icon-size` is fine as a length, but a bare
+            // `--icon-*` without a size/color sub-word holding `px` is strange.
+            if (ICON_AMBIGUOUS_NAME_RE.containsMatchIn(n)
+                && !ICON_SIZE_OVERRIDE_RE.containsMatchIn(n)
+                && !COLOR_NAME_RE.containsMatchIn(n)
+                && family == ValueFamily.LENGTH
+            ) {
+                out += Ambiguity(
+                    token = token,
+                    reason = "The name suggests an icon asset or colour token, but the value " +
+                        "is a length (`${raw.take(30)}`). If this is a size token, consider " +
+                        "renaming to `--icon-size-*` to make the intent clear.",
+                    alternativeInterpretation = "Could be an icon-size token — valid, but \"icon\" " +
+                        "without a size sub-word is ambiguous.",
+                )
+                continue
+            }
+
+            // ── Rule 3: generic/role names with no value-family hint ─────────
+            // Names like `--primary`, `--default`, `--base`, `--global` are
+            // intentionally catch-all. When we *can* determine the value family,
+            // we note that the name conveys no semantic intent.
+            if (GENERIC_ROLE_NAME_RE.matches(n)) {
+                val familyLabel = when (family) {
+                    ValueFamily.COLOR   -> "colour"
+                    ValueFamily.LENGTH  -> "length / metric"
+                    ValueFamily.DURATION -> "duration / animation"
+                    ValueFamily.SHADOW  -> "shadow"
+                    ValueFamily.NUMBER  -> "number"
+                }
+                out += Ambiguity(
+                    token = token,
+                    reason = "The token name carries no semantic hint about the kind of value " +
+                        "it holds. The resolved value looks like a $familyLabel. " +
+                        "Adding a category segment (e.g. `--primary-color`, " +
+                        "`--default-spacing`) makes intent self-documenting.",
+                    alternativeInterpretation = "A purely semantic/role name is a valid choice " +
+                        "in some design systems, but it reduces discoverability.",
+                )
+            }
         }
         return out.sortedBy { it.token.name }
     }
@@ -154,8 +257,11 @@ class DesignSystemAnalyzer(private val project: Project) {
             DURATION_NAME_RE.containsMatchIn(n) -> setOf(ValueFamily.DURATION)
             SHADOW_NAME_RE.containsMatchIn(n) -> setOf(ValueFamily.SHADOW, ValueFamily.LENGTH)
             ZINDEX_NAME_RE.containsMatchIn(n) -> setOf(ValueFamily.NUMBER)
-            // Other heuristics (radius / spacing / size / typography) are
-            // skipped: too ambiguous to flag confidently.
+            // Metric-family tokens: size, width, height, spacing, gap, margin,
+            // padding, radius, border-width, stroke-width. A colour value here
+            // is a clear mismatch (high-confidence). A length value is expected
+            // and never flagged. Numbers (unitless scale values) are also OK.
+            METRIC_NAME_RE.containsMatchIn(n) -> setOf(ValueFamily.LENGTH, ValueFamily.NUMBER)
             else -> null
         }
     }
@@ -399,20 +505,42 @@ class DesignSystemAnalyzer(private val project: Project) {
         return roots.any { path == it || path.startsWith("$it/") }
     }
 
-    // ─── Hardcoded clusters ──────────────────────────────────────────────
+    // ─── Hardcoded clusters & values ─────────────────────────────────────
 
-    private fun collectHardcodedClusters(
+    /**
+     * Split outcome of the hardcoded scan:
+     *  - [clusters]: literals repeating >= MIN_HARDCODED_CLUSTER times with
+     *    **no** matching token in the active scope — opportunity to create a
+     *    new token in the DS.
+     *  - [values]: literals (any occurrence count) where a matching token
+     *    already exists for the same `(value, category)` pair — actionable
+     *    debt, the user just needs to apply the existing token.
+     */
+    data class HardcodedScan(
+        val clusters: List<HardcodedCluster>,
+        val values: List<HardcodedValue>,
+    )
+
+    private fun collectHardcodedScan(
         tokens: List<DesignToken>,
         scannedFiles: List<VirtualFile>,
         ignoredNames: Set<String>,
-    ): List<HardcodedCluster> {
+    ): HardcodedScan {
         val valueIndex = TokenValueIndex(tokens)
         val settings = TokenSelectorSettings.getInstance(project)
         val inspectVariableDeclarations = settings.inspectVariableDeclarations
-        // Re-use the per-file literal scan but bucket by canonical literal.
-        data class Hit(val file: VirtualFile, val line: Int, val offset: Int)
-        val byLiteral = LinkedHashMap<String, MutableList<Hit>>()
-        val literalKinds = HashMap<String, LiteralFinder.Kind>()
+        // Bucket by (literal + category) so the same value used under two
+        // different property families (12px padding vs 12px font-size) lands
+        // in two separate groups with their own most-relevant suggestion.
+        data class BucketKey(val literal: String, val category: TokenCategory?)
+        data class Hit(
+            val file: VirtualFile,
+            val line: Int,
+            val offset: Int,
+            val kind: LiteralFinder.Kind,
+            val expectedRole: fr.fsh.tokendesigner.model.TokenRole?,
+        )
+        val byBucket = LinkedHashMap<BucketKey, MutableList<Hit>>()
         val tokenNames = tokens.map { it.name }.toSet()
 
         for (vf in scannedFiles) {
@@ -424,48 +552,79 @@ class DesignSystemAnalyzer(private val project: Project) {
                 if (h.kind == LiteralFinder.Kind.REFERENCE) continue
                 if (h.isDeclaration && (!inspectVariableDeclarations || (h.declarationName != null && h.declarationName in tokenNames))) continue
 
-                val key = h.text.lowercase()
-                if (key in ignoredNames) continue
+                val literal = h.text.lowercase()
+                if (literal in ignoredNames) continue
 
-                byLiteral.getOrPut(key) { mutableListOf() }
-                    .add(Hit(vf, lineFor(text, h.startOffset), h.startOffset))
-                literalKinds.putIfAbsent(key, h.kind)
+                // Property-context first: most accurate. Fall back to the
+                // literal's Kind so JS/TS hits (no CSS property around them)
+                // still get a coarse bucket.
+                val ctxCategory = PropertyContext.detectAt(text, h.startOffset)
+                val role = PropertyContext.detectRoleAt(text, h.startOffset)
+                val category = ctxCategory ?: kindFallbackCategory(h.kind)
+                val key = BucketKey(literal, category)
+
+                byBucket.getOrPut(key) { mutableListOf() }
+                    .add(Hit(vf, lineFor(text, h.startOffset), h.startOffset, h.kind, role))
             }
         }
 
-        return byLiteral.entries
-            .asSequence()
-            .filter { it.value.size >= MIN_HARDCODED_CLUSTER }
-            .mapNotNull { (lit, occurrences) ->
-                val kind = literalKinds[lit]
-                val cat = kind?.let {
-                    when (it) {
-                        LiteralFinder.Kind.COLOR -> TokenCategory.COLOR
-                        LiteralFinder.Kind.LENGTH -> TokenCategory.SPACING
-                        LiteralFinder.Kind.DURATION -> TokenCategory.DURATION
-                        LiteralFinder.Kind.NUMBER -> TokenCategory.SPACING
-                        LiteralFinder.Kind.REFERENCE -> null
-                    }
-                }
-                val matching = cat?.let { c -> valueIndex.lookup(lit, c).firstOrNull()?.name }
-                // If the literal already resolves to an existing token, the
-                // codebase-wide inspection / quick-fix already surfaces it.
-                // Surfacing it again here pads the report with already-fixable
-                // clusters; skip and keep the analyser focused on truly
-                // un-tokenised values.
-                if (matching != null) return@mapNotNull null
-                HardcodedCluster(
-                    literal = lit,
-                    category = cat,
-                    occurrences = occurrences.map {
-                        HardcodedOccurrence(it.file.path, it.offset, it.line)
-                    },
+        val clusters = mutableListOf<HardcodedCluster>()
+        val values = mutableListOf<HardcodedValue>()
+
+        for ((key, occurrences) in byBucket) {
+            val (literal, category) = key
+            val firstHit = occurrences.first()
+            // Synthetic Hit for the SuggestionEngine — offsets are irrelevant
+            // here, we only need text + kind to drive the lookup.
+            val syntheticHit = LiteralFinder.Hit(literal, 0, 0, firstHit.kind)
+            val suggestions = SuggestionEngine.findSuggestions(
+                syntheticHit, valueIndex, tokens, category, firstHit.expectedRole
+            )
+            // Strict category match for "value" classification: TokenValueIndex
+            // widens lookups across the length family (SPACING/SIZING/RADIUS/
+            // TYPOGRAPHY/BORDER) so a `12px` query under SIZING also returns
+            // typography tokens — useful for surfacing a closest-fit suggestion,
+            // but misleading when claiming "this value already has a matching
+            // token". A width:20px shouldn't be flagged as actionable debt
+            // because a typography token happens to hold 20px. Require the
+            // exact match to live in the same category as the bucket; when
+            // the bucket has no detected category (JS object, no CSS context)
+            // accept any exact match.
+            val exact = suggestions.firstOrNull { it.exact &&
+                (category == null || it.token.category == category) }?.token
+
+            val occList = occurrences.map { HardcodedOccurrence(it.file.path, it.offset, it.line) }
+
+            if (exact != null) {
+                // A token already covers this literal → actionable debt.
+                values += HardcodedValue(
+                    literal = literal,
+                    category = category,
+                    suggestedToken = exact,
+                    occurrences = occList,
+                )
+            } else if (occurrences.size >= MIN_HARDCODED_CLUSTER) {
+                clusters += HardcodedCluster(
+                    literal = literal,
+                    category = category,
+                    occurrences = occList,
                     matchingTokenName = null,
                 )
             }
-            .sortedByDescending { it.occurrences.size }
-            .take(50)
-            .toList()
+        }
+
+        return HardcodedScan(
+            clusters = clusters.sortedByDescending { it.occurrences.size }.take(50),
+            values = values.sortedByDescending { it.occurrences.size }.take(50),
+        )
+    }
+
+    private fun kindFallbackCategory(kind: LiteralFinder.Kind): TokenCategory? = when (kind) {
+        LiteralFinder.Kind.COLOR -> TokenCategory.COLOR
+        LiteralFinder.Kind.LENGTH -> TokenCategory.SPACING
+        LiteralFinder.Kind.DURATION -> TokenCategory.DURATION
+        LiteralFinder.Kind.NUMBER -> TokenCategory.SPACING
+        LiteralFinder.Kind.REFERENCE -> null
     }
 
     private fun lineFor(text: CharSequence, offset: Int): Int {
@@ -508,6 +667,7 @@ class DesignSystemAnalyzer(private val project: Project) {
         duplicates: List<DuplicateCluster>,
         coverage: CoverageScan,
         hardcoded: List<HardcodedCluster>,
+        hardcodedValues: List<HardcodedValue>,
     ): List<SubScore> {
         val totalTokens = tokens.size.coerceAtLeast(1)
 
@@ -515,9 +675,18 @@ class DesignSystemAnalyzer(private val project: Project) {
         val coverageScore = (coverage.report.ratio * 100).toInt().coerceIn(0, 100)
         val duplicateOffenders = duplicates.sumOf { it.tokens.size - 1 } // each cluster keeps one
         val duplicateScore = (100 - (100.0 * duplicateOffenders / totalTokens)).coerceIn(0.0, 100.0).toInt()
-        val hardcodedHits = hardcoded.sumOf { it.occurrences.size }
+
         val literalsTotal = coverage.report.literalAssignments.coerceAtLeast(1)
-        val hardcodedScore = (100 - (100.0 * hardcodedHits / literalsTotal)).coerceIn(0.0, 100.0).toInt()
+        // Opportunity: clusters of values with NO matching token — every hit
+        // pads the deficit linearly. These are design opportunities, not bugs,
+        // so weighting is moderate.
+        val opportunityHits = hardcoded.sumOf { it.occurrences.size }
+        val opportunityScore = (100 - (100.0 * opportunityHits / literalsTotal)).coerceIn(0.0, 100.0).toInt()
+        // Debt: literals whose token already exists. Penalty per hit is x2 vs
+        // opportunity — the fix is immediate and the user has no excuse not to
+        // apply the existing token.
+        val debtHits = hardcodedValues.sumOf { it.occurrences.size }
+        val debtScore = (100 - (100.0 * debtHits / literalsTotal) * 2).coerceIn(0.0, 100.0).toInt()
 
         // Broken references score: penalise relative to the total number of
         // token references attempted. A broken ref is a real bug (typo, removed
@@ -534,7 +703,7 @@ class DesignSystemAnalyzer(private val project: Project) {
                 else "${incoherences.size} token(s) with mismatched name/value semantics.",
             ),
             SubScore(
-                Axis.USAGE_COVERAGE, coverageScore, weight = 25,
+                Axis.USAGE_COVERAGE, coverageScore, weight = 20,
                 caption = "${coverage.report.tokenisedAssignments} tokenised vs " +
                     "${coverage.report.literalAssignments} literal references.",
             ),
@@ -544,8 +713,13 @@ class DesignSystemAnalyzer(private val project: Project) {
                 else "${duplicates.size} cluster(s), $duplicateOffenders extra token(s).",
             ),
             SubScore(
-                Axis.HARDCODED_PRESSURE, hardcodedScore, weight = 20,
-                caption = "${hardcoded.size} repeated literal(s) worth tokenising.",
+                Axis.HARDCODED_OPPORTUNITY, opportunityScore, weight = 15,
+                caption = "${hardcoded.size} repeated literal(s) without a matching token.",
+            ),
+            SubScore(
+                Axis.HARDCODED_DEBT, debtScore, weight = 10,
+                caption = if (hardcodedValues.isEmpty()) "No literal usages of an already-tokenised value."
+                else "${hardcodedValues.size} value(s) replaceable by an existing token ($debtHits hits).",
             ),
             SubScore(
                 Axis.REFERENCE_INTEGRITY, referenceIntegrityScore, weight = 20,
@@ -637,6 +811,59 @@ class DesignSystemAnalyzer(private val project: Project) {
         )
         private val ZINDEX_NAME_RE = Regex(
             "(?<![a-z])(z-?index|layer|stack-?level)(?![a-z])"
+        )
+        // Metric-family names: tokens whose name strongly implies a length or
+        // unitless number value. A colour value here is clearly wrong.
+        // Explicitly excludes `border-color` / `stroke-color` sub-words so
+        // composite names don't false-positive (that case is already covered by
+        // COLOR_NAME_RE hitting first in the when-chain).
+        private val METRIC_NAME_RE = Regex(
+            "(?<![a-z])(size|width|height|spacing|gap|margin|padding|radius|border-width|stroke-width|stroke-size)(?![a-z])"
+        )
+        // Ambiguity: typography-leaning names that could also carry a colour.
+        // Deliberately narrow: only words that *primarily* evoke typographic
+        // properties (size, weight, family) yet are also routinely used as
+        // text/label colour tokens — making the intent genuinely unclear.
+        // Words like `body`, `title`, `heading` are excluded because in
+        // component token systems they almost always denote a UI zone (table
+        // body, modal title…) rather than a typographic property, so flagging
+        // them generates far too many false positives.
+        private val TYPO_AMBIGUOUS_NAME_RE = Regex(
+            "(?<![a-z])(text|label|caption|font)(?![a-z])"
+        )
+        // If ANY of these words co-occurs with a typo-ambiguous word, the
+        // colour intent is considered self-evident and the token is NOT flagged.
+        // Covers:
+        //  • Colour-layer concepts: surface, foreground/fg, background/bg,
+        //    fill, overlay, border, outline, tint, shade, on (as in on-surface),
+        //    canvas, backdrop, layer, theme
+        //  • UI interaction / state / status words: disabled, hover, focus, active,
+        //    selected, checked, pressed, visited, placeholder, muted, faint, dim,
+        //    idle, rest, inverse, contrast, link, error, success, warning, info,
+        //    danger, alert, safe, critical, branding
+        // Together these capture the vast majority of intentional colour tokens
+        // that happen to contain a typo-leaning segment.
+        private val COLOR_CONTEXT_ESCAPE_RE = Regex(
+            "(?<![a-z])(surface|foreground|fg|background|bg|fill|overlay|" +
+                "border|outline|tint|shade|on|layer|theme|canvas|backdrop)(?![a-z])" +
+                "|(?<![a-z])(disabled|hover|focus|active|selected|checked|" +
+                "pressed|visited|placeholder|muted|faint|dim|idle|rest|" +
+                "inverse|contrast|link|error|success|warning|info|danger|" +
+                "alert|safe|critical|branding)(?![a-z])"
+        )
+        // Ambiguity: icon names that would be odd with a raw length.
+        private val ICON_AMBIGUOUS_NAME_RE = Regex(
+            "(?<![a-z])(icon|glyph|symbol|pictogram)(?![a-z])"
+        )
+        // Sub-words that make an icon token's length value self-explanatory.
+        // Includes size dimensions and metric/layout concepts (spacing, border, etc.)
+        // to avoid flagging spacing around icons as ambiguous.
+        private val ICON_SIZE_OVERRIDE_RE = Regex(
+            "(?<![a-z])(size|width|height|dimension|spacing|gap|padding|margin|offset|radius|border|stroke)(?![a-z])"
+        )
+        // Pure role/slot names with no value-family hint whatsoever.
+        private val GENERIC_ROLE_NAME_RE = Regex(
+            "^(primary|secondary|tertiary|default|base|global|generic|neutral|accent|muted|subtle|main|core|normal)$"
         )
 
         private val HEX_VALUE_RE = Regex("^#[0-9a-fA-F]{3,8}$")
