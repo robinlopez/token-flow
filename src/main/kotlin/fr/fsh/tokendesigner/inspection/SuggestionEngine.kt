@@ -51,7 +51,15 @@ object SuggestionEngine {
         // keeps the lookup working in JS object literals where the property
         // context is ambiguous.
         val lookupCategory = expectedCategory ?: hit.kind.toCategory()
+        // TokenValueIndex widens lookups across the length-bearing family so a
+        // 12px spacing token can substitute for a missing radius candidate.
+        // Useful when categories are interchangeable (SPACING ↔ SIZING ↔
+        // RADIUS) — actively harmful when they aren't (TYPOGRAPHY or BORDER
+        // for `width`, SIZING for `font-size`). Filter incompatible pairs out
+        // *before* ranking so a typography token never surfaces on a width
+        // declaration just because no sizing token holds that exact value.
         val exact = valueIndex.lookup(hit.text, lookupCategory)
+            .filter { expectedCategory == null || !isFamilyMismatch(expectedCategory, it.category) }
         // Helper-aware exact matches: a hardcoded `12` or `12px` can be
         // produced by a `spacing(value)` helper whose unit is `8` (call it
         // with `1.5`). Compose them with the direct exact matches so the
@@ -189,6 +197,20 @@ object SuggestionEngine {
 
         // 1. Category alignment with the surrounding CSS property.
         if (expectedCategory != null && s.token.category == expectedCategory) n -= 100
+        // 1b. Cross-family demotion. TokenValueIndex deliberately widens
+        //     lookups across the length-bearing family (SPACING / SIZING /
+        //     RADIUS / TYPOGRAPHY / BORDER) so a `12px` spacing token can
+        //     stand in for a missing radius — but some pairs inside that
+        //     family are semantically incompatible (typography ↔ width,
+        //     border-width ↔ font-size). When the property's expected family
+        //     and the token's family don't share an axis, apply a heavy
+        //     penalty so a wrong-family token only surfaces as a last-resort
+        //     fuzzy hint and never beats a strict in-family candidate.
+        if (expectedCategory != null && s.token.category != expectedCategory
+            && isFamilyMismatch(expectedCategory, s.token.category)
+        ) {
+            n += 200
+        }
 
         // 2. Role alignment (surface / content / stroke / effect).
         if (expectedRole != null) {
@@ -217,6 +239,27 @@ object SuggestionEngine {
         return n
     }
 
+    /**
+     * Within the length-bearing family, decides whether two categories share
+     * an axis or are semantically incompatible. Compatible pairs (metric
+     * group: SPACING / SIZING / RADIUS) can substitute for one another —
+     * design systems regularly reuse the same scale across spacing, sizing
+     * and small radii. TYPOGRAPHY and BORDER each stand alone: a font-size
+     * token has no business being suggested for `width`, and vice versa.
+     *
+     * Categories outside the length family (COLOR / DURATION / SHADOW /
+     * EFFECTS / Z_INDEX / OPACITY / LAYOUT / OTHER / ICON) are returned as
+     * mismatched against anything else — they never legitimately cross over.
+     */
+    private fun isFamilyMismatch(expected: TokenCategory, actual: TokenCategory): Boolean {
+        if (expected == actual) return false
+        val metric = setOf(TokenCategory.SPACING, TokenCategory.SIZING, TokenCategory.RADIUS)
+        return when {
+            expected in metric && actual in metric -> false
+            else -> true
+        }
+    }
+
     private val PRIMITIVE_PREFIXES = setOf(
         "units", "unit", "palette", "base", "primitive", "primitives",
         "core", "scale", "raw",
@@ -233,10 +276,15 @@ object SuggestionEngine {
      */
     fun tierOf(rawName: String): TokenTier {
         val n = rawName.lowercase().trimStart('-', '$')
-        val head = n.substringBefore('-')
+        // Tokens come in two flavours: CSS / SCSS use dash-separated segments
+        // (`units-xl`), JS object-path tokens use dot-separated ones
+        // (`units.xl`). Split on either so the leading segment is captured
+        // identically — otherwise `units.sm` falls through to SEMANTIC and
+        // outranks a legitimate semantic alternative.
+        val head = n.split('-', '.').first()
         return when {
             head in PRIMITIVE_PREFIXES -> TokenTier.PRIMITIVE
-            n.startsWith("token-") || head in COMPONENT_PREFIXES -> TokenTier.COMPONENT
+            n.startsWith("token-") || n.startsWith("token.") || head in COMPONENT_PREFIXES -> TokenTier.COMPONENT
             else -> TokenTier.SEMANTIC
         }
     }
@@ -249,7 +297,7 @@ object SuggestionEngine {
      */
     fun roleOf(rawName: String): TokenRole? {
         val n = rawName.lowercase().trimStart('-', '$')
-        val segments = n.split('-')
+        val segments = n.split('-', '.')
         for (seg in segments) {
             when (seg) {
                 "surface", "background", "bg", "fill", "canvas" -> return TokenRole.SURFACE

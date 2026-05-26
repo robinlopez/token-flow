@@ -39,10 +39,12 @@ class DesignSystemAnalyzer(private val project: Project) {
         val duplicates = detectDuplicates(tokens)
         val coverage = computeCoverage(tokens, scopeFile, ignoredNames)
         val broken = coverage.brokenReferences
-        val hardcoded = collectHardcodedClusters(tokens, coverage.scannedFiles, ignoredNames)
+        val hardcodedScan = collectHardcodedScan(tokens, coverage.scannedFiles, ignoredNames)
+        val hardcoded = hardcodedScan.clusters
+        val hardcodedValues = hardcodedScan.values
         val unused = tokens.filter { it.name !in coverage.referencedNames }.sortedBy { it.name }
 
-        val subScores = computeSubScores(tokens, incoherences, duplicates, coverage, hardcoded)
+        val subScores = computeSubScores(tokens, incoherences, duplicates, coverage, hardcoded, hardcodedValues)
         val score = subScores.weightedAverage()
         val grade = grade(score)
 
@@ -54,6 +56,7 @@ class DesignSystemAnalyzer(private val project: Project) {
             ambiguities = ambiguities,
             duplicateClusters = duplicates,
             hardcodedClusters = hardcoded,
+            hardcodedValues = hardcodedValues,
             coverage = coverage.report,
             brokenReferences = broken,
             unusedTokens = unused,
@@ -502,20 +505,42 @@ class DesignSystemAnalyzer(private val project: Project) {
         return roots.any { path == it || path.startsWith("$it/") }
     }
 
-    // ─── Hardcoded clusters ──────────────────────────────────────────────
+    // ─── Hardcoded clusters & values ─────────────────────────────────────
 
-    private fun collectHardcodedClusters(
+    /**
+     * Split outcome of the hardcoded scan:
+     *  - [clusters]: literals repeating >= MIN_HARDCODED_CLUSTER times with
+     *    **no** matching token in the active scope — opportunity to create a
+     *    new token in the DS.
+     *  - [values]: literals (any occurrence count) where a matching token
+     *    already exists for the same `(value, category)` pair — actionable
+     *    debt, the user just needs to apply the existing token.
+     */
+    data class HardcodedScan(
+        val clusters: List<HardcodedCluster>,
+        val values: List<HardcodedValue>,
+    )
+
+    private fun collectHardcodedScan(
         tokens: List<DesignToken>,
         scannedFiles: List<VirtualFile>,
         ignoredNames: Set<String>,
-    ): List<HardcodedCluster> {
+    ): HardcodedScan {
         val valueIndex = TokenValueIndex(tokens)
         val settings = TokenSelectorSettings.getInstance(project)
         val inspectVariableDeclarations = settings.inspectVariableDeclarations
-        // Re-use the per-file literal scan but bucket by canonical literal.
-        data class Hit(val file: VirtualFile, val line: Int, val offset: Int)
-        val byLiteral = LinkedHashMap<String, MutableList<Hit>>()
-        val literalKinds = HashMap<String, LiteralFinder.Kind>()
+        // Bucket by (literal + category) so the same value used under two
+        // different property families (12px padding vs 12px font-size) lands
+        // in two separate groups with their own most-relevant suggestion.
+        data class BucketKey(val literal: String, val category: TokenCategory?)
+        data class Hit(
+            val file: VirtualFile,
+            val line: Int,
+            val offset: Int,
+            val kind: LiteralFinder.Kind,
+            val expectedRole: fr.fsh.tokendesigner.model.TokenRole?,
+        )
+        val byBucket = LinkedHashMap<BucketKey, MutableList<Hit>>()
         val tokenNames = tokens.map { it.name }.toSet()
 
         for (vf in scannedFiles) {
@@ -527,48 +552,79 @@ class DesignSystemAnalyzer(private val project: Project) {
                 if (h.kind == LiteralFinder.Kind.REFERENCE) continue
                 if (h.isDeclaration && (!inspectVariableDeclarations || (h.declarationName != null && h.declarationName in tokenNames))) continue
 
-                val key = h.text.lowercase()
-                if (key in ignoredNames) continue
+                val literal = h.text.lowercase()
+                if (literal in ignoredNames) continue
 
-                byLiteral.getOrPut(key) { mutableListOf() }
-                    .add(Hit(vf, lineFor(text, h.startOffset), h.startOffset))
-                literalKinds.putIfAbsent(key, h.kind)
+                // Property-context first: most accurate. Fall back to the
+                // literal's Kind so JS/TS hits (no CSS property around them)
+                // still get a coarse bucket.
+                val ctxCategory = PropertyContext.detectAt(text, h.startOffset)
+                val role = PropertyContext.detectRoleAt(text, h.startOffset)
+                val category = ctxCategory ?: kindFallbackCategory(h.kind)
+                val key = BucketKey(literal, category)
+
+                byBucket.getOrPut(key) { mutableListOf() }
+                    .add(Hit(vf, lineFor(text, h.startOffset), h.startOffset, h.kind, role))
             }
         }
 
-        return byLiteral.entries
-            .asSequence()
-            .filter { it.value.size >= MIN_HARDCODED_CLUSTER }
-            .mapNotNull { (lit, occurrences) ->
-                val kind = literalKinds[lit]
-                val cat = kind?.let {
-                    when (it) {
-                        LiteralFinder.Kind.COLOR -> TokenCategory.COLOR
-                        LiteralFinder.Kind.LENGTH -> TokenCategory.SPACING
-                        LiteralFinder.Kind.DURATION -> TokenCategory.DURATION
-                        LiteralFinder.Kind.NUMBER -> TokenCategory.SPACING
-                        LiteralFinder.Kind.REFERENCE -> null
-                    }
-                }
-                val matching = cat?.let { c -> valueIndex.lookup(lit, c).firstOrNull()?.name }
-                // If the literal already resolves to an existing token, the
-                // codebase-wide inspection / quick-fix already surfaces it.
-                // Surfacing it again here pads the report with already-fixable
-                // clusters; skip and keep the analyser focused on truly
-                // un-tokenised values.
-                if (matching != null) return@mapNotNull null
-                HardcodedCluster(
-                    literal = lit,
-                    category = cat,
-                    occurrences = occurrences.map {
-                        HardcodedOccurrence(it.file.path, it.offset, it.line)
-                    },
+        val clusters = mutableListOf<HardcodedCluster>()
+        val values = mutableListOf<HardcodedValue>()
+
+        for ((key, occurrences) in byBucket) {
+            val (literal, category) = key
+            val firstHit = occurrences.first()
+            // Synthetic Hit for the SuggestionEngine — offsets are irrelevant
+            // here, we only need text + kind to drive the lookup.
+            val syntheticHit = LiteralFinder.Hit(literal, 0, 0, firstHit.kind)
+            val suggestions = SuggestionEngine.findSuggestions(
+                syntheticHit, valueIndex, tokens, category, firstHit.expectedRole
+            )
+            // Strict category match for "value" classification: TokenValueIndex
+            // widens lookups across the length family (SPACING/SIZING/RADIUS/
+            // TYPOGRAPHY/BORDER) so a `12px` query under SIZING also returns
+            // typography tokens — useful for surfacing a closest-fit suggestion,
+            // but misleading when claiming "this value already has a matching
+            // token". A width:20px shouldn't be flagged as actionable debt
+            // because a typography token happens to hold 20px. Require the
+            // exact match to live in the same category as the bucket; when
+            // the bucket has no detected category (JS object, no CSS context)
+            // accept any exact match.
+            val exact = suggestions.firstOrNull { it.exact &&
+                (category == null || it.token.category == category) }?.token
+
+            val occList = occurrences.map { HardcodedOccurrence(it.file.path, it.offset, it.line) }
+
+            if (exact != null) {
+                // A token already covers this literal → actionable debt.
+                values += HardcodedValue(
+                    literal = literal,
+                    category = category,
+                    suggestedToken = exact,
+                    occurrences = occList,
+                )
+            } else if (occurrences.size >= MIN_HARDCODED_CLUSTER) {
+                clusters += HardcodedCluster(
+                    literal = literal,
+                    category = category,
+                    occurrences = occList,
                     matchingTokenName = null,
                 )
             }
-            .sortedByDescending { it.occurrences.size }
-            .take(50)
-            .toList()
+        }
+
+        return HardcodedScan(
+            clusters = clusters.sortedByDescending { it.occurrences.size }.take(50),
+            values = values.sortedByDescending { it.occurrences.size }.take(50),
+        )
+    }
+
+    private fun kindFallbackCategory(kind: LiteralFinder.Kind): TokenCategory? = when (kind) {
+        LiteralFinder.Kind.COLOR -> TokenCategory.COLOR
+        LiteralFinder.Kind.LENGTH -> TokenCategory.SPACING
+        LiteralFinder.Kind.DURATION -> TokenCategory.DURATION
+        LiteralFinder.Kind.NUMBER -> TokenCategory.SPACING
+        LiteralFinder.Kind.REFERENCE -> null
     }
 
     private fun lineFor(text: CharSequence, offset: Int): Int {
@@ -611,6 +667,7 @@ class DesignSystemAnalyzer(private val project: Project) {
         duplicates: List<DuplicateCluster>,
         coverage: CoverageScan,
         hardcoded: List<HardcodedCluster>,
+        hardcodedValues: List<HardcodedValue>,
     ): List<SubScore> {
         val totalTokens = tokens.size.coerceAtLeast(1)
 
@@ -618,9 +675,18 @@ class DesignSystemAnalyzer(private val project: Project) {
         val coverageScore = (coverage.report.ratio * 100).toInt().coerceIn(0, 100)
         val duplicateOffenders = duplicates.sumOf { it.tokens.size - 1 } // each cluster keeps one
         val duplicateScore = (100 - (100.0 * duplicateOffenders / totalTokens)).coerceIn(0.0, 100.0).toInt()
-        val hardcodedHits = hardcoded.sumOf { it.occurrences.size }
+
         val literalsTotal = coverage.report.literalAssignments.coerceAtLeast(1)
-        val hardcodedScore = (100 - (100.0 * hardcodedHits / literalsTotal)).coerceIn(0.0, 100.0).toInt()
+        // Opportunity: clusters of values with NO matching token — every hit
+        // pads the deficit linearly. These are design opportunities, not bugs,
+        // so weighting is moderate.
+        val opportunityHits = hardcoded.sumOf { it.occurrences.size }
+        val opportunityScore = (100 - (100.0 * opportunityHits / literalsTotal)).coerceIn(0.0, 100.0).toInt()
+        // Debt: literals whose token already exists. Penalty per hit is x2 vs
+        // opportunity — the fix is immediate and the user has no excuse not to
+        // apply the existing token.
+        val debtHits = hardcodedValues.sumOf { it.occurrences.size }
+        val debtScore = (100 - (100.0 * debtHits / literalsTotal) * 2).coerceIn(0.0, 100.0).toInt()
 
         // Broken references score: penalise relative to the total number of
         // token references attempted. A broken ref is a real bug (typo, removed
@@ -637,7 +703,7 @@ class DesignSystemAnalyzer(private val project: Project) {
                 else "${incoherences.size} token(s) with mismatched name/value semantics.",
             ),
             SubScore(
-                Axis.USAGE_COVERAGE, coverageScore, weight = 25,
+                Axis.USAGE_COVERAGE, coverageScore, weight = 20,
                 caption = "${coverage.report.tokenisedAssignments} tokenised vs " +
                     "${coverage.report.literalAssignments} literal references.",
             ),
@@ -647,8 +713,13 @@ class DesignSystemAnalyzer(private val project: Project) {
                 else "${duplicates.size} cluster(s), $duplicateOffenders extra token(s).",
             ),
             SubScore(
-                Axis.HARDCODED_PRESSURE, hardcodedScore, weight = 20,
-                caption = "${hardcoded.size} repeated literal(s) worth tokenising.",
+                Axis.HARDCODED_OPPORTUNITY, opportunityScore, weight = 15,
+                caption = "${hardcoded.size} repeated literal(s) without a matching token.",
+            ),
+            SubScore(
+                Axis.HARDCODED_DEBT, debtScore, weight = 10,
+                caption = if (hardcodedValues.isEmpty()) "No literal usages of an already-tokenised value."
+                else "${hardcodedValues.size} value(s) replaceable by an existing token ($debtHits hits).",
             ),
             SubScore(
                 Axis.REFERENCE_INTEGRITY, referenceIntegrityScore, weight = 20,
