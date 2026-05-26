@@ -15,6 +15,7 @@ data class AnalysisReport(
     val grade: String,                           // A / B / C / D / F derived from [score]
     val subScores: List<SubScore>,               // axis-by-axis breakdown
     val incoherences: List<Incoherence>,
+    val ambiguities: List<Ambiguity>,            // tokens whose naming is ambiguous (informational)
     val duplicateClusters: List<DuplicateCluster>,
     val hardcodedClusters: List<HardcodedCluster>,
     val coverage: Coverage,
@@ -47,6 +48,17 @@ data class Incoherence(
     val expectedCategory: TokenCategory,         // what the *name* implies
     val actualCategory: TokenCategory,           // what the *value* implies
     val rationale: String,                       // human-friendly explanation for the row
+)
+
+/**
+ * A token whose name is **ambiguous** — not outright wrong, but it could
+ * plausibly map to more than one value family depending on the team's
+ * convention. Surfaced as an informational notice, not an error.
+ */
+data class Ambiguity(
+    val token: DesignToken,
+    val reason: String,                          // why the name is considered ambiguous
+    val alternativeInterpretation: String,       // the other plausible reading of the name
 )
 
 /** A group of tokens sharing the same resolved value — i.e. duplicates. */

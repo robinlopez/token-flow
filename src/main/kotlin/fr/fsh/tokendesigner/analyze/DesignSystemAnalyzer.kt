@@ -12,6 +12,7 @@ import fr.fsh.tokendesigner.inspection.PropertyContext
 import fr.fsh.tokendesigner.inspection.SuggestionEngine
 import fr.fsh.tokendesigner.inspection.TokenValueIndex
 import fr.fsh.tokendesigner.model.DesignToken
+import fr.fsh.tokendesigner.analyze.Ambiguity
 import fr.fsh.tokendesigner.model.TokenCategory
 import fr.fsh.tokendesigner.scanner.DynamicCssVarIndex
 import fr.fsh.tokendesigner.scanner.TokenCategorizer
@@ -34,6 +35,7 @@ class DesignSystemAnalyzer(private val project: Project) {
         val ignoredNames = collectIgnoredNames(scopeFile)
 
         val incoherences = detectIncoherences(tokens)
+        val ambiguities = detectAmbiguities(tokens, incoherences)
         val duplicates = detectDuplicates(tokens)
         val coverage = computeCoverage(tokens, scopeFile, ignoredNames)
         val broken = coverage.brokenReferences
@@ -49,6 +51,7 @@ class DesignSystemAnalyzer(private val project: Project) {
             grade = grade,
             subScores = subScores,
             incoherences = incoherences,
+            ambiguities = ambiguities,
             duplicateClusters = duplicates,
             hardcodedClusters = hardcoded,
             coverage = coverage.report,
@@ -95,6 +98,103 @@ class DesignSystemAnalyzer(private val project: Project) {
                 actualCategory = actual.tokenCategoryHint,
                 rationale = describeMismatch(expected, actual, raw),
             )
+        }
+        return out.sortedBy { it.token.name }
+    }
+
+    /**
+     * Detects tokens that are not outright incoherent but whose **name is
+     * ambiguous**: it maps plausibly to more than one value family, and the
+     * actual resolved value matches the *less obvious* interpretation.
+     *
+     * Examples:
+     *  - `--text-default: #45566` → `text` commonly signals typography (size,
+     *    weight), but a hex colour is also valid as a text colour — ambiguous.
+     *  - `--icon-primary: 24px` → `icon` usually means a colour or an asset
+     *    reference, a raw length is unexpected.
+     *
+     * Tokens that already appear in [incoherences] are excluded — they have a
+     * stronger signal and are surfaced there instead.
+     */
+    private fun detectAmbiguities(
+        tokens: List<DesignToken>,
+        incoherences: List<Incoherence>,
+    ): List<Ambiguity> {
+        val incoherentNames = incoherences.map { it.token.name }.toSet()
+        val out = mutableListOf<Ambiguity>()
+
+        for (token in tokens) {
+            if (token.name in incoherentNames) continue
+            val raw = token.resolvedValue.trim()
+            if (raw.isBlank() || isUnresolvedReference(raw) || isCssKeyword(raw)) continue
+            val family = valueFamily(raw) ?: continue
+
+            val n = token.name.lowercase().trimStart('-', '$')
+
+            // ── Rule 1: text/label/caption with a colour value ──────────────
+            // These words can suggest typography (size, font) OR a text/label
+            // colour — both are valid, which is exactly the ambiguity.
+            // Guard: if the name also contains a word that unambiguously
+            // signals colour intent (surface, foreground, disabled, hover…)
+            // then the token is NOT ambiguous — its intent is obvious.
+            if (TYPO_AMBIGUOUS_NAME_RE.containsMatchIn(n)
+                && family == ValueFamily.COLOR
+                && !COLOR_NAME_RE.containsMatchIn(n)
+                && !COLOR_CONTEXT_ESCAPE_RE.containsMatchIn(n)
+            ) {
+                out += Ambiguity(
+                    token = token,
+                    reason = "The name suggests a typography token (font size, weight, family) " +
+                        "but the value is a colour (`${raw.take(30)}`). " +
+                        "If this is intentional (e.g. a text colour), consider renaming to " +
+                        "`--text-color-*` or `--*-color` to make the intent explicit.",
+                    alternativeInterpretation = "Could be a text-colour token — valid, but the name " +
+                        "does not make the colour intent obvious.",
+                )
+                continue
+            }
+
+            // ── Rule 2: icon/glyph with a raw length value ───────────────────
+            // `--icon-primary` or `--icon-size` is fine as a length, but a bare
+            // `--icon-*` without a size/color sub-word holding `px` is strange.
+            if (ICON_AMBIGUOUS_NAME_RE.containsMatchIn(n)
+                && !ICON_SIZE_OVERRIDE_RE.containsMatchIn(n)
+                && !COLOR_NAME_RE.containsMatchIn(n)
+                && family == ValueFamily.LENGTH
+            ) {
+                out += Ambiguity(
+                    token = token,
+                    reason = "The name suggests an icon asset or colour token, but the value " +
+                        "is a length (`${raw.take(30)}`). If this is a size token, consider " +
+                        "renaming to `--icon-size-*` to make the intent clear.",
+                    alternativeInterpretation = "Could be an icon-size token — valid, but \"icon\" " +
+                        "without a size sub-word is ambiguous.",
+                )
+                continue
+            }
+
+            // ── Rule 3: generic/role names with no value-family hint ─────────
+            // Names like `--primary`, `--default`, `--base`, `--global` are
+            // intentionally catch-all. When we *can* determine the value family,
+            // we note that the name conveys no semantic intent.
+            if (GENERIC_ROLE_NAME_RE.matches(n)) {
+                val familyLabel = when (family) {
+                    ValueFamily.COLOR   -> "colour"
+                    ValueFamily.LENGTH  -> "length / metric"
+                    ValueFamily.DURATION -> "duration / animation"
+                    ValueFamily.SHADOW  -> "shadow"
+                    ValueFamily.NUMBER  -> "number"
+                }
+                out += Ambiguity(
+                    token = token,
+                    reason = "The token name carries no semantic hint about the kind of value " +
+                        "it holds. The resolved value looks like a $familyLabel. " +
+                        "Adding a category segment (e.g. `--primary-color`, " +
+                        "`--default-spacing`) makes intent self-documenting.",
+                    alternativeInterpretation = "A purely semantic/role name is a valid choice " +
+                        "in some design systems, but it reduces discoverability.",
+                )
+            }
         }
         return out.sortedBy { it.token.name }
     }
@@ -154,8 +254,11 @@ class DesignSystemAnalyzer(private val project: Project) {
             DURATION_NAME_RE.containsMatchIn(n) -> setOf(ValueFamily.DURATION)
             SHADOW_NAME_RE.containsMatchIn(n) -> setOf(ValueFamily.SHADOW, ValueFamily.LENGTH)
             ZINDEX_NAME_RE.containsMatchIn(n) -> setOf(ValueFamily.NUMBER)
-            // Other heuristics (radius / spacing / size / typography) are
-            // skipped: too ambiguous to flag confidently.
+            // Metric-family tokens: size, width, height, spacing, gap, margin,
+            // padding, radius, border-width, stroke-width. A colour value here
+            // is a clear mismatch (high-confidence). A length value is expected
+            // and never flagged. Numbers (unitless scale values) are also OK.
+            METRIC_NAME_RE.containsMatchIn(n) -> setOf(ValueFamily.LENGTH, ValueFamily.NUMBER)
             else -> null
         }
     }
@@ -637,6 +740,59 @@ class DesignSystemAnalyzer(private val project: Project) {
         )
         private val ZINDEX_NAME_RE = Regex(
             "(?<![a-z])(z-?index|layer|stack-?level)(?![a-z])"
+        )
+        // Metric-family names: tokens whose name strongly implies a length or
+        // unitless number value. A colour value here is clearly wrong.
+        // Explicitly excludes `border-color` / `stroke-color` sub-words so
+        // composite names don't false-positive (that case is already covered by
+        // COLOR_NAME_RE hitting first in the when-chain).
+        private val METRIC_NAME_RE = Regex(
+            "(?<![a-z])(size|width|height|spacing|gap|margin|padding|radius|border-width|stroke-width|stroke-size)(?![a-z])"
+        )
+        // Ambiguity: typography-leaning names that could also carry a colour.
+        // Deliberately narrow: only words that *primarily* evoke typographic
+        // properties (size, weight, family) yet are also routinely used as
+        // text/label colour tokens — making the intent genuinely unclear.
+        // Words like `body`, `title`, `heading` are excluded because in
+        // component token systems they almost always denote a UI zone (table
+        // body, modal title…) rather than a typographic property, so flagging
+        // them generates far too many false positives.
+        private val TYPO_AMBIGUOUS_NAME_RE = Regex(
+            "(?<![a-z])(text|label|caption|font)(?![a-z])"
+        )
+        // If ANY of these words co-occurs with a typo-ambiguous word, the
+        // colour intent is considered self-evident and the token is NOT flagged.
+        // Covers:
+        //  • Colour-layer concepts: surface, foreground/fg, background/bg,
+        //    fill, overlay, border, outline, tint, shade, on (as in on-surface),
+        //    canvas, backdrop, layer, theme
+        //  • UI interaction / state / status words: disabled, hover, focus, active,
+        //    selected, checked, pressed, visited, placeholder, muted, faint, dim,
+        //    idle, rest, inverse, contrast, link, error, success, warning, info,
+        //    danger, alert, safe, critical, branding
+        // Together these capture the vast majority of intentional colour tokens
+        // that happen to contain a typo-leaning segment.
+        private val COLOR_CONTEXT_ESCAPE_RE = Regex(
+            "(?<![a-z])(surface|foreground|fg|background|bg|fill|overlay|" +
+                "border|outline|tint|shade|on|layer|theme|canvas|backdrop)(?![a-z])" +
+                "|(?<![a-z])(disabled|hover|focus|active|selected|checked|" +
+                "pressed|visited|placeholder|muted|faint|dim|idle|rest|" +
+                "inverse|contrast|link|error|success|warning|info|danger|" +
+                "alert|safe|critical|branding)(?![a-z])"
+        )
+        // Ambiguity: icon names that would be odd with a raw length.
+        private val ICON_AMBIGUOUS_NAME_RE = Regex(
+            "(?<![a-z])(icon|glyph|symbol|pictogram)(?![a-z])"
+        )
+        // Sub-words that make an icon token's length value self-explanatory.
+        // Includes size dimensions and metric/layout concepts (spacing, border, etc.)
+        // to avoid flagging spacing around icons as ambiguous.
+        private val ICON_SIZE_OVERRIDE_RE = Regex(
+            "(?<![a-z])(size|width|height|dimension|spacing|gap|padding|margin|offset|radius|border|stroke)(?![a-z])"
+        )
+        // Pure role/slot names with no value-family hint whatsoever.
+        private val GENERIC_ROLE_NAME_RE = Regex(
+            "^(primary|secondary|tertiary|default|base|global|generic|neutral|accent|muted|subtle|main|core|normal)$"
         )
 
         private val HEX_VALUE_RE = Regex("^#[0-9a-fA-F]{3,8}$")

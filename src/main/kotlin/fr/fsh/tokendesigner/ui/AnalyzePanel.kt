@@ -19,6 +19,7 @@ import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.JBFont
 import com.intellij.util.ui.JBUI
+import fr.fsh.tokendesigner.analyze.Ambiguity
 import fr.fsh.tokendesigner.analyze.AnalysisReport
 import fr.fsh.tokendesigner.analyze.DesignSystemAnalyzer
 import fr.fsh.tokendesigner.analyze.DuplicateCluster
@@ -393,6 +394,14 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
         ), MAX_CONTENT_WIDTH))
         content.add(verticalSpacer(10))
         content.add(capWidth(CollapsibleSection(
+            title = "Ambiguous tokens",
+            count = report.ambiguities.size,
+            helpText = AMBIGUITY_HELP,
+            body = ambiguityBody(report.ambiguities),
+            initiallyCollapsed = true,
+        ), MAX_CONTENT_WIDTH))
+        content.add(verticalSpacer(10))
+        content.add(capWidth(CollapsibleSection(
             title = "Token-source usage",
             count = report.coverage.sources.size,
             helpText = COVERAGE_HELP,
@@ -512,6 +521,33 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
         val text = "<html><b>${escape(row.token.name)}</b><br/>" +
             "<span style='color:#888'>${escape(row.rationale)}</span></html>"
         return rowPanel(text, locate = { navigateTo(row.token.filePath, row.token.offset) })
+    }
+
+    private fun ambiguityBody(rows: List<Ambiguity>): JComponent {
+        if (rows.isEmpty()) return emptyState("No ambiguous token names detected.")
+        val panel = verticalList()
+        renderTruncatedList(panel, rows, limit = 50) { ambiguityRow(it) }
+        return panel
+    }
+
+    private fun ambiguityRow(row: Ambiguity): JComponent {
+        val text = "<html>" +
+            "<b>${escape(row.token.name)}</b>" +
+            "&nbsp;<span style='color:#888;font-size:90%'>= ${escape(row.token.resolvedValue.take(40))}</span>" +
+            "<br/><span style='color:#888;font-style:italic'>${escape(row.reason)}</span>" +
+            "<br/><span style='color:#1A73E8'>💡 ${escape(row.alternativeInterpretation)}</span>" +
+            "</html>"
+        val panel = JPanel(BorderLayout()).apply {
+            alignmentX = Component.LEFT_ALIGNMENT
+            border = BorderFactory.createCompoundBorder(
+                JBUI.Borders.customLineBottom(JBColor.border()),
+                JBUI.Borders.empty(8, 4),
+            )
+            isOpaque = false
+        }
+        panel.add(JBLabel(text), BorderLayout.CENTER)
+        panel.add(targetButton("Open declaration") { navigateTo(row.token.filePath, row.token.offset) }, BorderLayout.EAST)
+        return panel
     }
 
     private fun unusedBody(tokens: List<DesignToken>): JComponent {
@@ -801,6 +837,11 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
 
         const val INCOHERENCE_HELP =
             "Tokens whose name suggests one category but whose value implies another. " +
+                "Click the target icon to jump to the declaration."
+        const val AMBIGUITY_HELP =
+            "Tokens that are not necessarily wrong, but whose name is ambiguous: it could " +
+                "plausibly refer to more than one type of value. These are informational notices " +
+                "to help you improve naming clarity in your design system. " +
                 "Click the target icon to jump to the declaration."
         const val DUPLICATE_HELP =
             "Tokens declared separately but resolving to the same value. " +
