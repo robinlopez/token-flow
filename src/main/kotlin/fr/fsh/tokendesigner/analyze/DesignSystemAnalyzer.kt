@@ -539,18 +539,42 @@ class DesignSystemAnalyzer(private val project: Project) {
             val offset: Int,
             val kind: LiteralFinder.Kind,
             val expectedRole: fr.fsh.tokendesigner.model.TokenRole?,
+            val propertyName: String?,
         )
         val byBucket = LinkedHashMap<BucketKey, MutableList<Hit>>()
         val tokenNames = tokens.map { it.name }.toSet()
+        // Pure-declaration files: paths that *only* declare tokens (JSON/TS/JS
+        // catalogs). Their entire content is a token definition, so flagging
+        // any literal inside as "hardcoded" is pure noise. SCSS / CSS / Vue
+        // are left in the scan even when they declare tokens, because they
+        // commonly mix declarations with consumption rules.
+        val pureDeclarationExtensions = setOf("ts", "tsx", "js", "jsx", "json")
+        val pureDeclarationSources = tokens.asSequence()
+            .filter { it.filePath.substringAfterLast('.').lowercase() in pureDeclarationExtensions }
+            .map { it.filePath }
+            .toSet()
 
         for (vf in scannedFiles) {
+            if (vf.path in pureDeclarationSources) continue
             val text = try {
                 readAction { VfsUtilCore.loadText(vf) }
             } catch (_: Exception) { continue }
             for (h in LiteralFinder.findIn(text)) {
                 if (h.insidePartialString) continue
                 if (h.kind == LiteralFinder.Kind.REFERENCE) continue
-                if (h.isDeclaration && (!inspectVariableDeclarations || (h.declarationName != null && h.declarationName in tokenNames))) continue
+                // Skip token-map values (SCSS `$map: (...)` entries) and any
+                // detected variable / object-property declaration. The latter
+                // bypasses `inspectVariableDeclarations` when the declaration
+                // sits in a token-source file — those declarations are *never*
+                // consumption, so the setting shouldn't unhide them.
+                if (h.insideTokenMap) continue
+                val isCatalogFile = vf.path in pureDeclarationSources
+                if (h.isDeclaration && (
+                        isCatalogFile ||
+                            !inspectVariableDeclarations ||
+                            (h.declarationName != null && h.declarationName in tokenNames)
+                        )
+                ) continue
 
                 val literal = h.text.lowercase()
                 if (literal in ignoredNames) continue
@@ -560,11 +584,12 @@ class DesignSystemAnalyzer(private val project: Project) {
                 // still get a coarse bucket.
                 val ctxCategory = PropertyContext.detectAt(text, h.startOffset)
                 val role = PropertyContext.detectRoleAt(text, h.startOffset)
+                val propertyName = PropertyContext.detectPropertyNameAt(text, h.startOffset)
                 val category = ctxCategory ?: kindFallbackCategory(h.kind)
                 val key = BucketKey(literal, category)
 
                 byBucket.getOrPut(key) { mutableListOf() }
-                    .add(Hit(vf, lineFor(text, h.startOffset), h.startOffset, h.kind, role))
+                    .add(Hit(vf, lineFor(text, h.startOffset), h.startOffset, h.kind, role, propertyName))
             }
         }
 
@@ -591,9 +616,12 @@ class DesignSystemAnalyzer(private val project: Project) {
             // the bucket has no detected category (JS object, no CSS context)
             // accept any exact match.
             val exact = suggestions.firstOrNull { it.exact &&
-                (category == null || it.token.category == category) }?.token
+                (category == null || it.token.category == category) &&
+                isTokenUsableInAll(it.token, occurrences.map { it.file }) }?.token
 
-            val occList = occurrences.map { HardcodedOccurrence(it.file.path, it.offset, it.line) }
+            val occList = occurrences.map {
+                HardcodedOccurrence(it.file.path, it.offset, it.line, it.propertyName)
+            }
 
             if (exact != null) {
                 // A token already covers this literal → actionable debt.
@@ -613,10 +641,45 @@ class DesignSystemAnalyzer(private val project: Project) {
             }
         }
 
+        // No `.take(…)` cap here: the UI uses a `+more` expander to truncate
+        // the visible list, so the full set must reach the report — otherwise
+        // a hard 50-row ceiling at the analyser layer artificially capped the
+        // counter even when many more hits existed.
         return HardcodedScan(
-            clusters = clusters.sortedByDescending { it.occurrences.size }.take(50),
-            values = values.sortedByDescending { it.occurrences.size }.take(50),
+            clusters = clusters.sortedByDescending { it.occurrences.size },
+            values = values.sortedByDescending { it.occurrences.size },
         )
+    }
+
+    /**
+     * True when [token] can be referenced from every file in [files] given
+     * the file extension's binding format. CSS custom properties / SCSS
+     * variables aren't reachable from a `.ts` / `.tsx` / `.js` / `.jsx`
+     * source — suggesting a `var(--foo)` token in a React Native style
+     * object is wrong because that file can't resolve CSS variables. Only
+     * JS-flavoured token kinds (object paths, runtime property accesses,
+     * runtime helpers) are valid there.
+     *
+     * Returns true when [files] is empty so an exact match always survives
+     * if no occurrence files were captured (shouldn't happen in practice).
+     */
+    private fun isTokenUsableInAll(
+        token: DesignToken,
+        files: List<VirtualFile>,
+    ): Boolean {
+        if (files.isEmpty()) return true
+        return files.all { isTokenUsableIn(token, it.extension?.lowercase()) }
+    }
+
+    private fun isTokenUsableIn(token: DesignToken, ext: String?): Boolean = when (ext) {
+        "ts", "tsx", "js", "jsx" -> token.kind in JS_BINDABLE_KINDS
+        "json" -> token.kind in JS_BINDABLE_KINDS
+        "css" -> token.kind == fr.fsh.tokendesigner.model.TokenKind.CSS_CUSTOM_PROPERTY
+        // SCSS / Sass / Vue: anything goes — these files routinely consume
+        // both `$var` and `var(--…)`, and `<script>` blocks in Vue accept
+        // JS-style tokens too.
+        "scss", "sass", "vue", "html", null -> true
+        else -> true
     }
 
     private fun kindFallbackCategory(kind: LiteralFinder.Kind): TokenCategory? = when (kind) {
@@ -746,6 +809,12 @@ class DesignSystemAnalyzer(private val project: Project) {
     companion object {
         private const val MIN_HARDCODED_CLUSTER = 2
         private val COVERAGE_EXTS = listOf("scss", "sass", "css", "vue", "ts", "tsx", "js", "jsx")
+        /** Token kinds reachable from a `.ts` / `.tsx` / `.js` / `.jsx` / `.json` source. */
+        private val JS_BINDABLE_KINDS = setOf(
+            fr.fsh.tokendesigner.model.TokenKind.JS_OBJECT_PATH,
+            fr.fsh.tokendesigner.model.TokenKind.JS_RUNTIME_PROPERTY,
+            fr.fsh.tokendesigner.model.TokenKind.JS_RUNTIME_FUNCTION,
+        )
         // Each pattern's group 1 captures the bare token name so we can fold
         // the references into a single `Set<String>` for unused-token detection.
         private val CSS_REF = Regex("var\\(\\s*--([A-Za-z_][A-Za-z0-9_-]*)(?:\\s*,.*)?\\)")

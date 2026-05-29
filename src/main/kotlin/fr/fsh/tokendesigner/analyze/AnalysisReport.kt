@@ -104,6 +104,13 @@ data class HardcodedOccurrence(
     val filePath: String,
     val offset: Int,
     val line: Int,
+    /**
+     * CSS / JS property name the literal is assigned to, when detectable
+     * (e.g. `padding`, `font-size`, `borderRadius`). Surfaced in the
+     * dashboard's per-occurrence rows so the user sees WHY the literal was
+     * picked up instead of a redundant parent-folder echo.
+     */
+    val propertyName: String? = null,
 )
 
 data class Coverage(

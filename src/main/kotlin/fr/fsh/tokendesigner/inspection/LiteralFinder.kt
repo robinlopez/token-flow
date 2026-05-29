@@ -154,9 +154,10 @@ object LiteralFinder {
             if (isWhitelisted(value)) continue
             if (isIgnored(start)) continue
             if (out.any { it.startOffset == start }) continue
-            // If the key starts with $ or is --, it's a variable declaration.
-            val key = m.value.substringBefore(':').trim()
-            val declName = if (key.startsWith("$") || key.startsWith("--")) key else null
+            // Reuse the same declaration detector as the unit-bearing literals
+            // so RN/JS catalog files (`sm: 8`, `"sm": 8`) are folded into the
+            // declaration bucket exactly like `8px` and skipped consistently.
+            val declName = variableDeclarationName(text, start)
             out += Hit(
                 value, start, end, Kind.NUMBER,
                 isDeclaration = declName != null,
@@ -444,8 +445,35 @@ object LiteralFinder {
      * Checks if the literal at [offset] is part of a variable declaration
      * like `$name: ...` or `--name: ...`, and returns the variable name.
      */
+    /**
+     * Walks back from a literal hit to decide whether it sits in a variable /
+     * property *declaration* (token definition) rather than a *consumption*
+     * site. Recognised shapes:
+     *
+     *  • SCSS:  `$name: <literal>`               → returns `$name`
+     *  • CSS:   `--name: <literal>`              → returns `--name`
+     *  • JS/TS object literal:                   → returns the bare key
+     *      - `name: "<literal>"` or `name: '<literal>'`
+     *      - `"name": "<literal>"` / `'name': '<literal>'`
+     *      - `"name": <literal>` (numeric value)
+     *
+     * For a *bare* key with a *bare* numeric value (e.g. `padding: 12px` in a
+     * CSS block) we deliberately return `null`. That shape is ambiguous —
+     * either a CSS rule (definite consumption, should be flagged) or a
+     * RN-style object property (could be either). We err on flagging so real
+     * CSS hardcoded values still surface; the token-source file whole-skip
+     * (see `DesignSystemAnalyzer.collectHardcodedScan`) handles the few false
+     * positives that remain in TS catalog files.
+     */
     private fun variableDeclarationName(text: CharSequence, offset: Int): String? {
         var i = offset - 1
+        while (i >= 0 && text[i].isWhitespace()) i--
+
+        // Optional opening string quote — the literal lives inside `"…"` /
+        // `'…'` / `` `…` ``. This is the strong JS/JSON declaration signal.
+        val openQuote = if (i >= 0 && (text[i] == '"' || text[i] == '\'' || text[i] == '`')) {
+            text[i].also { i-- }
+        } else null
         while (i >= 0 && text[i].isWhitespace()) i--
         if (i < 0 || text[i] != ':') return null
 
@@ -453,7 +481,19 @@ object LiteralFinder {
         while (i >= 0 && text[i].isWhitespace()) i--
         if (i < 0) return null
 
-        // Match variable name backwards
+        // Quoted key — only legal in JS / TS / JSON object literals, never in
+        // CSS. Always treated as a declaration regardless of value shape.
+        if (text[i] == '"' || text[i] == '\'') {
+            val keyEnd = i
+            val quote = text[i]
+            i--
+            while (i >= 0 && text[i] != quote) i--
+            if (i < 0) return null
+            val name = text.subSequence(i + 1, keyEnd).toString()
+            return name.ifBlank { null }
+        }
+
+        // Bare key — walk back to capture the identifier.
         var j = i
         while (j >= 0 && (text[j].isLetterOrDigit() || text[j] == '-' || text[j] == '_')) j--
         if (j == i) return null
@@ -462,10 +502,15 @@ object LiteralFinder {
 
         // SCSS: $name
         if (j >= 0 && text[j] == '$') return "$$name"
-
-        // CSS: --name
+        // CSS custom property: --name
         if (j > 0 && text[j] == '-' && text[j - 1] == '-') return "--$name"
 
+        // Bare key with **quoted** value → JS/TS declaration (`size: "8px"`).
+        if (openQuote != null) return name
+
+        // Bare key, bare value → ambiguous CSS-rule vs. RN-style assignment.
+        // Return null so legitimate hardcoded CSS values still surface; the
+        // token-source whole-file skip handles the RN-catalog edge case.
         return null
     }
 

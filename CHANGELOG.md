@@ -2,6 +2,21 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/) — versionning [SemVer](https://semver.org/).
 
+## [0.2.1] — 2026-05-29
+
+### Added
+- **Analyser — sticky section headers** : while scrolling through a long report, the header of the section currently in view pins itself at the top of the panel. The sticky strip mirrors the section title and count — you always know which section you are reading without scrolling back to the heading.
+
+### Changed
+- **Analyser — section order** : *Broken references* is now the first section — these are genuine bugs (broken `var(--…)` / `$var` references) and should be triaged before the lower-urgency hardcoded sections. *Hardcoded clusters* and *Hardcoded values* follow immediately after.
+- **Analyser — occurrence rows show `filename:line · property` instead of parent folder** : the per-file list inside an expanded hardcoded row now shows the CSS/JS property the literal is bound to (`Button.scss:42 · padding`) instead of echoing the parent directory name. The fixed 28 px height cap that clipped long labels has been removed.
+- **Analyser — no more 50-row ceiling on hardcoded results** : the hard cap of 50 at the analyser layer has been removed. Truncation is now handled exclusively by the `+ N more…` expander in the UI, so the count badge always matches the real number of detected items.
+
+### Fixed
+- **Analyser — token definitions no longer flagged as hardcoded** : literal values that are part of a token declaration (SCSS `$var: value`, CSS `--var: value`, JSON / JS object entries such as `"sm": "8px"`) are now correctly recognised as definitions and excluded from both *Hardcoded clusters* and *Hardcoded values*. Declaration detection has been extended to quoted JSON / JS object keys (`"borderRadius": "8px"`, `"sm": 8`).
+- **Analyser — pure token-catalog files fully excluded from hardcoded scan** : `.ts/.tsx/.js/.jsx/.json` files registered as token sources are now skipped entirely in the hardcoded scan, eliminating false positives from design-token catalog files.
+- **Analyser — TS / JS files only receive format-compatible token suggestions** : CSS custom-property suggestions (`var(--…)`) are no longer offered when the occurrence lives in a `.ts`/`.tsx`/`.js`/`.jsx` source. Only JS-reachable token kinds (object-path, runtime property access, helper call) are surfaced.
+
 ## [0.2.0] — 2026-05-22
 
 ### Added

@@ -22,9 +22,9 @@ import javax.swing.JPanel
  * pass the body component pre-built — it isn't recomputed on toggle.
  */
 class CollapsibleSection(
-    title: String,
-    count: Int,
-    helpText: String? = null,
+    private val title: String,
+    private val count: Int,
+    private val helpText: String? = null,
     private val body: JComponent,
     initiallyCollapsed: Boolean = false,
 ) : JPanel(BorderLayout()) {
@@ -39,6 +39,42 @@ class CollapsibleSection(
     )
 
     private var collapsed: Boolean = initiallyCollapsed
+
+    private val stateListeners = mutableListOf<() -> Unit>()
+
+    /** Fires whenever the section toggles between collapsed / expanded. */
+    fun addStateChangeListener(l: () -> Unit) { stateListeners += l }
+
+    /** Height of the clickable header strip — used by the sticky overlay. */
+    val headerHeight: Int get() = getComponent(0).height
+
+    /** Identity used by the sticky overlay to detect "same section" — stable per instance. */
+    val headerSignature: String get() = "$title|$count"
+
+    /**
+     * Builds a non-interactive replica of the header. The dashboard's sticky
+     * banner reuses this so the overlay matches the original styling without
+     * needing to know how the header was assembled internally.
+     */
+    fun buildHeaderClone(): JComponent {
+        val cloneLeft = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+            isOpaque = false
+            add(JLabel(AllIcons.General.ArrowDown).apply { border = JBUI.Borders.emptyRight(8) })
+            add(JLabel("<html><b>$title</b></html>"))
+        }
+        val cloneRight = JPanel(FlowLayout(FlowLayout.RIGHT, JBUI.scale(8), 0)).apply {
+            isOpaque = false
+            add(JLabel("<html><span style='color:#888'>$count</span></html>"))
+            if (helpText != null) {
+                add(JLabel(AllIcons.General.ContextHelp).apply { toolTipText = helpText })
+            }
+        }
+        return JPanel(BorderLayout()).apply {
+            isOpaque = false
+            add(cloneLeft, BorderLayout.WEST)
+            add(cloneRight, BorderLayout.EAST)
+        }
+    }
 
     init {
         alignmentX = Component.LEFT_ALIGNMENT
@@ -98,5 +134,6 @@ class CollapsibleSection(
         (getComponent(1) as JComponent).isVisible = !collapsed
         revalidate()
         repaint()
+        stateListeners.forEach { it() }
     }
 }
