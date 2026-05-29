@@ -61,6 +61,20 @@ Supported formats: SCSS variables, CSS Custom Properties, SCSS Maps, TS/JS prese
     ]]></description>
 
     <change-notes><![CDATA[
+
+<h3>0.2.1 — Smarter hardcoded detection, sticky section headers</h3>
+<ul>
+  <li><b>Token definitions no longer flagged as hardcoded values</b>: literals declared inside token sources are now correctly recognised as definitions and excluded from <i>Hardcoded clusters</i> and <i>Hardcoded values</i>. Covers JSON / TS / JS token catalogs, SCSS variables, CSS custom properties, and quoted object keys like <code>"sm": "8px"</code> or <code>"borderRadius": "8px"</code>.</li>
+  <li><b>Format-aware token suggestions in TS / JS files</b>: when a hardcoded literal is detected inside <code>.ts</code> / <code>.tsx</code> / <code>.js</code> / <code>.jsx</code> files, the analyser now only suggests token usages that are actually valid in those environments. CSS custom-property suggestions (<code>var(--…)</code>) are no longer proposed in runtime-only contexts.</li>
+  <li><b>Accurate hardcoded hit counts</b>: the analyser now reports the real number of detected <i>Hardcoded clusters</i> and <i>Hardcoded values</i>. The previous internal 50-item truncation has been removed, while UI collapsing is still handled through the expandable <code>+ N more…</code> control.</li>
+  <li><b>Sticky section headers while scrolling</b>: long analysis reports now keep the current section title and count pinned at the top of the panel, making navigation easier while reviewing large reports.</li>
+  <li><b>Broken references promoted to top priority</b>: the <i>Broken references</i> section now appears first in the report so unresolved <code>var(--…)</code> and <code>$var</code> usages surface immediately as actionable bugs before lower-priority hardcoded issues.</li>
+  <li><b>Cleaner occurrence rows</b>: expanded hardcoded entries now display occurrences as <code>filename:line · property</code> for faster scanning. The associated CSS or JS property is shown directly, repeated folder names were removed, and long filenames are no longer clipped by a fixed-height row layout.</li>
+  <li><b>Pure token source files excluded from scans</b>: registered token catalog files (<code>.ts</code>, <code>.tsx</code>, <code>.js</code>, <code>.jsx</code>, <code>.json</code>) are now fully ignored during hardcoded analysis to eliminate false positives coming from design-token definitions.</li>
+</ul>
+
+</ul>
+
 <h3>0.2.0 — Sharper Analyser, contextual CSS-var discovery</h3>
 <ul>
   <li><b>Hardcoded results split into two lists</b>: the Analyser now separates <i>Hardcoded clusters</i> (repeated literals with NO matching token — opportunities to extend the DS) from <i>Hardcoded values</i> (literals where a token already exists — pure actionable debt). Values are grouped by <code>(value + property family)</code> so <code>12px</code> on a <code>padding</code> and <code>12px</code> on a <code>font-size</code> show up separately, each with its own role-aware token suggestion. New <i>Hardcoded opportunity</i> + <i>Hardcoded debt</i> score axes replace the previous single pressure axis.</li>
