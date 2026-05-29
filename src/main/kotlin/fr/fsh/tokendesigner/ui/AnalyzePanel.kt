@@ -194,6 +194,34 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
         }
     }
 
+    /**
+     * Tracks every [CollapsibleSection] added to the report, in display order.
+     * Used by the sticky-header overlay to find the section currently
+     * touching the top of the viewport and mirror its header there.
+     */
+    private val sectionRegistry = mutableListOf<CollapsibleSection>()
+
+    /**
+     * Floating banner painted above the scroll viewport. When a section's own
+     * header scrolls past the top, we mirror its title/count here so the user
+     * keeps a context anchor while reading long lists. Hidden when no section
+     * is partially scrolled past.
+     *
+     * Declared before [init] because the constructor wires it into the
+     * content stack — keeping it below would leave it `null` at that point.
+     */
+    private val stickyHeader: JPanel = JPanel(BorderLayout()).apply {
+        isVisible = false
+        isOpaque = true
+        background = JBColor.namedColor("ToolWindow.HeaderBackground", JBColor(0xF5F5F5, 0x3C3F41))
+        border = BorderFactory.createCompoundBorder(
+            JBUI.Borders.customLineBottom(JBColor.border()),
+            JBUI.Borders.empty(8, 12 + 16, 8, 12 + 16),  // align with capWidth padding
+        )
+    }
+
+    private var lastStickyKey: String? = null
+
     init {
         rebuildScopeCombo()
         setupToolbar()
@@ -202,9 +230,22 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
             border = null
             horizontalScrollBarPolicy = JBScrollPane.HORIZONTAL_SCROLLBAR_NEVER
         }
+        // Recompute the sticky pin every time the viewport scrolls. Cheap —
+        // we only swap the displayed header when the active section actually
+        // changes (see `lastStickyKey`).
+        scroll.viewport.addChangeListener {
+            javax.swing.SwingUtilities.invokeLater { updateStickyHeader() }
+        }
+        // Sticky banner lives directly above the scroll pane, on the same
+        // NORTH stack as the stale banner. BorderLayout stacking keeps it
+        // pinned even when the report grows past the viewport.
+        val scrollColumn = JPanel(BorderLayout()).apply {
+            add(stickyHeader, BorderLayout.NORTH)
+            add(scroll, BorderLayout.CENTER)
+        }
         setContent(JPanel(BorderLayout()).apply {
             add(staleBanner, BorderLayout.NORTH)
-            add(scroll, BorderLayout.CENTER)
+            add(scrollColumn, BorderLayout.CENTER)
         })
         TokenSelectorSettings.getInstance(project).addScopesChangeListener(scopesListener)
         setupEditorTracking()
@@ -387,74 +428,117 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
         content.add(verticalSpacer(14))
         content.add(subScoresGrid(report.subScores))
         content.add(verticalSpacer(18))
-        // Order chosen for actionability: noisy/dirty stuff (hardcoded, unused,
-        // duplicates) bubble up first so the user sees what to clean up;
-        // structural/curiosity sections (semantic mismatches, source usage) sit
-        // at the bottom.
-        content.add(capWidth(CollapsibleSection(
-            title = "Hardcoded clusters",
-            count = report.hardcodedClusters.size,
-            helpText = HARDCODED_HELP,
-            body = hardcodedBody(report.hardcodedClusters),
-        ), MAX_CONTENT_WIDTH))
-        content.add(verticalSpacer(10))
-        content.add(capWidth(CollapsibleSection(
-            title = "Hardcoded values",
-            count = report.hardcodedValues.size,
-            helpText = HARDCODED_VALUES_HELP,
-            body = hardcodedValuesBody(report.hardcodedValues),
-        ), MAX_CONTENT_WIDTH))
-        content.add(verticalSpacer(10))
-        content.add(capWidth(CollapsibleSection(
+        sectionRegistry.clear()
+        // Order chosen for actionability: broken references first — those are
+        // genuine bugs (missing tokens, typos). Then the two hardcoded sections
+        // (cleanup opportunities). Structural / curiosity sections sit at the
+        // bottom.
+        addSection(CollapsibleSection(
             title = "Broken references",
             count = report.brokenReferences.size,
             helpText = BROKEN_REF_HELP,
             body = brokenReferencesBody(report.brokenReferences),
-        ), MAX_CONTENT_WIDTH))
-        content.add(verticalSpacer(10))
-
-        content.add(capWidth(CollapsibleSection(
+        ))
+        addSection(CollapsibleSection(
+            title = "Hardcoded values",
+            count = report.hardcodedValues.size,
+            helpText = HARDCODED_VALUES_HELP,
+            body = hardcodedValuesBody(report.hardcodedValues),
+        ))
+        addSection(CollapsibleSection(
+            title = "Hardcoded clusters",
+            count = report.hardcodedClusters.size,
+            helpText = HARDCODED_HELP,
+            body = hardcodedBody(report.hardcodedClusters),
+        ))
+        addSection(CollapsibleSection(
             title = "Unused tokens",
             count = report.unusedTokens.size,
             helpText = UNUSED_HELP,
             body = unusedBody(report.unusedTokens),
             initiallyCollapsed = true,
-        ), MAX_CONTENT_WIDTH))
-        content.add(verticalSpacer(10))
-        content.add(capWidth(CollapsibleSection(
+        ))
+        addSection(CollapsibleSection(
             title = "Duplicates",
             count = report.duplicateClusters.size,
             helpText = DUPLICATE_HELP,
             body = duplicateBody(report.duplicateClusters),
             initiallyCollapsed = true,
-        ), MAX_CONTENT_WIDTH))
-        content.add(verticalSpacer(10))
-        content.add(capWidth(CollapsibleSection(
+        ))
+        addSection(CollapsibleSection(
             title = "Semantic incoherences",
             count = report.incoherences.size,
             helpText = INCOHERENCE_HELP,
             body = incoherenceBody(report.incoherences),
             initiallyCollapsed = true,
-        ), MAX_CONTENT_WIDTH))
-        content.add(verticalSpacer(10))
-        content.add(capWidth(CollapsibleSection(
+        ))
+        addSection(CollapsibleSection(
             title = "Ambiguous tokens",
             count = report.ambiguities.size,
             helpText = AMBIGUITY_HELP,
             body = ambiguityBody(report.ambiguities),
             initiallyCollapsed = true,
-        ), MAX_CONTENT_WIDTH))
-        content.add(verticalSpacer(10))
-        content.add(capWidth(CollapsibleSection(
+        ))
+        addSection(CollapsibleSection(
             title = "Token-source usage",
             count = report.coverage.sources.size,
             helpText = COVERAGE_HELP,
             body = coverageBody(report),
             initiallyCollapsed = true,
-        ), MAX_CONTENT_WIDTH))
+        ))
         content.add(verticalSpacer(12))
         content.revalidate()
         content.repaint()
+        updateStickyHeader()
+    }
+
+    /**
+     * Tracks every [CollapsibleSection] added to the report. Used by the
+     * sticky-header overlay so it can find the section currently touching
+     * the top of the viewport and mirror its header there.
+     */
+    private fun addSection(section: CollapsibleSection) {
+        sectionRegistry += section
+        content.add(capWidth(section, MAX_CONTENT_WIDTH))
+        content.add(verticalSpacer(10))
+        // Both the toggle (collapse/expand) and any later layout pass need to
+        // recompute which section is currently pinned at the top.
+        section.addStateChangeListener { updateStickyHeader() }
+    }
+
+    private fun updateStickyHeader() {
+        val viewport = findViewport(content) ?: return
+        val viewY = viewport.viewPosition.y
+        var pinned: CollapsibleSection? = null
+        for (sec in sectionRegistry) {
+            if (!sec.isShowing) continue
+            val secWrapper = sec.parent ?: continue
+            val topInContent = try {
+                javax.swing.SwingUtilities.convertPoint(secWrapper, 0, 0, content).y
+            } catch (_: Exception) { continue }
+            val headerH = sec.headerHeight
+            val sectionBottom = topInContent + secWrapper.height
+            // The section's own header has scrolled out, but the section
+            // still intersects the viewport.
+            if (viewY in (topInContent + 1) until sectionBottom &&
+                viewY >= topInContent + headerH
+            ) {
+                pinned = sec
+                break
+            }
+        }
+        val newKey = pinned?.headerSignature
+        if (newKey == lastStickyKey) return
+        lastStickyKey = newKey
+        stickyHeader.removeAll()
+        if (pinned == null) {
+            stickyHeader.isVisible = false
+        } else {
+            stickyHeader.add(pinned.buildHeaderClone(), BorderLayout.CENTER)
+            stickyHeader.isVisible = true
+        }
+        stickyHeader.revalidate()
+        stickyHeader.repaint()
     }
 
     private fun headerSection(report: AnalysisReport, scopeLabel: String): JComponent {
@@ -784,19 +868,29 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
 
     private fun occurrenceTableRow(occ: HardcodedOccurrence): JComponent {
         val basename = occ.filePath.substringAfterLast('/')
-        val parent = occ.filePath.substringBeforeLast('/').substringAfterLast('/')
+        // Caption: `filename:line · property`. We replaced the old "parent
+        // folder" segment with the CSS / JS property the literal is bound to —
+        // far more actionable (it answers "WHY did this row surface?") and
+        // avoids visually repeating the filename across sibling rows.
+        val propertyChunk = occ.propertyName
+            ?.let { "<span style='color:#888'>· <i>${escape(it)}</i></span>" }
+            .orEmpty()
         val text = JBLabel(
-            "<html><code>$basename</code>:${occ.line} " +
-                "<span style='color:#888'>· $parent</span></html>"
+            "<html><nobr><code>${escape(basename)}</code>:${occ.line} $propertyChunk</nobr></html>"
         ).apply { toolTipText = occ.filePath }
-        val locate = targetButton("Open ${basename}:${occ.line}") {
+        // Tooltip on the locate button used to echo "Open <basename>:<line>",
+        // duplicating the visible caption. A generic verb is enough — the row
+        // already labels what we'll open.
+        val locate = targetButton("Open occurrence") {
             navigateTo(occ.filePath, occ.offset)
         }
-        return JPanel(BorderLayout()).apply {
+        // No fixed-height maximumSize: a small icon button never grows the row
+        // and a hard `28px` cap was clipping long captions on narrower tool
+        // windows. Let the row size itself to its content.
+        return JPanel(BorderLayout(JBUI.scale(8), 0)).apply {
             isOpaque = false
             alignmentX = Component.LEFT_ALIGNMENT
             border = JBUI.Borders.empty(3, 0)
-            maximumSize = Dimension(Int.MAX_VALUE, JBUI.scale(28))
             add(text, BorderLayout.CENTER)
             add(locate, BorderLayout.EAST)
         }
@@ -956,6 +1050,16 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
 
 
     private fun verticalSpacer(px: Int): Component = Box.createVerticalStrut(JBUI.scale(px))
+
+    /** Walks up the Swing parent chain to find the enclosing [JViewport], if any. */
+    private fun findViewport(c: Component): javax.swing.JViewport? {
+        var p: Component? = c
+        while (p != null) {
+            if (p is javax.swing.JViewport) return p
+            p = p.parent
+        }
+        return null
+    }
 
     private fun navigateTo(filePath: String, offset: Int) {
         val vf = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return
