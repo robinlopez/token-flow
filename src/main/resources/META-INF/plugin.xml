@@ -67,6 +67,7 @@ Supported formats: SCSS variables, CSS Custom Properties, SCSS Maps, TS/JS prese
   <li>The TS/JS and SCSS parsers now automatically filter out non-style objects, JSON schemas, test/Storybook files, and local SCSS variables, drastically reducing noise without requiring any manual configuration. Even inside a real token object, non-style entries (labels, variant names) are dropped — only actual style values are indexed.</li>
   <li>BEM modifier syntax in selectors (e.g. <code>.card__slot--closeable:hover</code> or the SCSS parent-ref <code>&amp;--selected:not(.x)</code>) is no longer mistaken for a CSS custom-property declaration. <code>--</code> is only treated as a token when it really is one — a property declaration or a <code>var(--…)</code> call.</li>
   <li>No more circular suggestions: a token definition (e.g. <code>--color-bg-page: #e5e9eb</code>) no longer suggests replacing its own value with itself. The token being declared is excluded from its own suggestion list.</li>
+  <li>The Analyser's Scope picker no longer offers the confusing <i>Active editor</i> option. The analysed scope is now an explicit choice (<i>All project</i> by default, plus your configured scopes) and stays put as you move between files. The Library and Hardcoded Values panels still follow the active editor.</li>
 </ul>
 
 <h3>0.2.1 — Smarter hardcoded detection, sticky section headers</h3>
