@@ -62,6 +62,11 @@ Supported formats: SCSS variables, CSS Custom Properties, SCSS Maps, TS/JS prese
 
     <change-notes><![CDATA[
 
+<h3>0.2.2 - Smarter Indexing & Fewer False Positives</h3>
+<ul>
+  <li>The TS/JS and SCSS parsers now automatically filter out non-style objects, JSON schemas, test/Storybook files, and local SCSS variables, drastically reducing noise without requiring any manual configuration.</li>
+</ul>
+
 <h3>0.2.1 — Smarter hardcoded detection, sticky section headers</h3>
 <ul>
   <li><b>Token definitions no longer flagged as hardcoded values</b>: literals declared inside token sources are now correctly recognised as definitions and excluded from <i>Hardcoded clusters</i> and <i>Hardcoded values</i>. Covers JSON / TS / JS token catalogs, SCSS variables, CSS custom properties, and quoted object keys like <code>"sm": "8px"</code> or <code>"borderRadius": "8px"</code>.</li>

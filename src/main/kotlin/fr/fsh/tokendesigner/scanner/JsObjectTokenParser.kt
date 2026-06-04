@@ -22,17 +22,29 @@ object JsObjectTokenParser {
 
     data class Leaf(val path: String, val value: String, val offset: Int)
 
-    fun parse(text: CharSequence): List<Leaf> {
-        val out = mutableListOf<Leaf>()
+    /** Flattened leaves across every top-level exported object. */
+    fun parse(text: CharSequence): List<Leaf> = parseGroups(text).flatten()
+
+    /**
+     * Like [parse] but keeps each top-level `export const|default` object's
+     * leaves in its own list. Callers that classify a *whole object* as a
+     * token dictionary vs. an application config object (see
+     * [StyleValueHeuristics]) need this grouping so they can keep or drop each
+     * exported object independently rather than mixing their leaves.
+     */
+    fun parseGroups(text: CharSequence): List<List<Leaf>> {
+        val groups = mutableListOf<List<Leaf>>()
         // Walk every top-level `export const|default` exported object.
         val regex = Regex("\\bexport\\s+(?:default|const\\s+\\w+)\\s*[:=]?\\s*")
         for (match in regex.findAll(text)) {
             var i = match.range.last + 1
             i = skipWs(text, i)
             if (i >= text.length || text[i] != '{') continue
-            walkObject(text, i + 1, ArrayDeque(), out)
+            val group = mutableListOf<Leaf>()
+            walkObject(text, i + 1, ArrayDeque(), group)
+            if (group.isNotEmpty()) groups += group
         }
-        return out
+        return groups
     }
 
     /**

@@ -128,7 +128,23 @@ class TokenScanner(private val project: Project) {
         sink: MutableList<RawToken>,
     ) {
         if (isScss) {
+            // Only top-level `$var:` declarations are design tokens. Variables
+            // declared inside a `{ … }` block (`@function`, `@mixin`, `@each`,
+            // a selector, …) are locally-scoped Sass helpers — e.g. `$map`,
+            // `$value` reused across a loop — and must not pollute the index
+            // (issue #24). We gate on brace depth, advancing a running counter
+            // over the gaps between successive matches (matches are ordered).
+            var pos = 0
+            var depth = 0
             for (m in SCSS_VAR_REGEX.findAll(text)) {
+                while (pos < m.range.first) {
+                    when (text[pos]) {
+                        '{' -> depth++
+                        '}' -> if (depth > 0) depth--
+                    }
+                    pos++
+                }
+                if (depth > 0) continue
                 val raw = m.groupValues[2].trim().trimEnd(';').trim()
                 val cleanedRaw = raw.replace(Regex("(?i)!(default|global|important)\\s*$"), "").trim()
                 sink += RawToken(
@@ -163,8 +179,14 @@ class TokenScanner(private val project: Project) {
     }
 
     private fun extractJsLike(text: CharSequence, path: String, sink: MutableList<RawToken>) {
+        val fileName = path.substringAfterLast('/')
+        // Storybook stories, test files, and config files never contain design tokens.
+        if (".stories." in fileName || ".spec." in fileName || ".test." in fileName) return
+
         val parsed = JsTokenFileParserRegistry.parseFull(text)
-        val kind = JsTokenFileParserRegistry.parserFor(parsed.mode).kind
+        if (parsed.mode == JsTokenFileParserRegistry.Mode.NONE) return
+
+        val kind = JsTokenFileParserRegistry.parserFor(parsed.mode)!!.kind
         for (leaf in parsed.leaves) {
             sink += RawToken(
                 name = leaf.path,
