@@ -45,6 +45,43 @@ object SuggestionEngine {
         expectedCategory: TokenCategory?,
         expectedRole: TokenRole? = null,
     ): List<TokenSuggestion> {
+        val ranked = rankSuggestions(hit, valueIndex, allTokens, expectedCategory, expectedRole)
+        // Issue #23 — never suggest the token currently being *defined* as the
+        // replacement for its own literal: `--color-bg-page: #e5e9eb` must not
+        // offer `var(--color-bg-page)` (a self-reference loop). The declaring
+        // name comes verbatim from the Hit; synthetic hits (whole-file scan,
+        // recursive fallback lookups) carry no declaration name, so this is a
+        // no-op there.
+        val declaring = hit.declarationName ?: return ranked
+        return ranked.filter { !isSelfReference(it.token.name, declaring) }
+    }
+
+    /**
+     * `true` when [tokenName] denotes the same token as the one being declared
+     * ([declarationName]). Handles the three syntaxes the declaration walker
+     * emits: `--name` (CSS), `$name` (SCSS) and a bare leaf key (JS/JSON object
+     * path, where the token name is the full dotted path `colors.bg` but the
+     * declaration name is just `bg`).
+     */
+    private fun isSelfReference(tokenName: String, declarationName: String): Boolean {
+        val t = tokenName.trim()
+        val d = declarationName.trim()
+        if (t.equals(d, ignoreCase = true)) return true
+        fun strip(s: String) = s.removePrefix("--").removePrefix("$")
+        val ts = strip(t)
+        val ds = strip(d)
+        if (ts.equals(ds, ignoreCase = true)) return true
+        // JS object path: declaration name is the trailing key only.
+        return ds.isNotEmpty() && ts.endsWith(".$ds", ignoreCase = true)
+    }
+
+    private fun rankSuggestions(
+        hit: LiteralFinder.Hit,
+        valueIndex: TokenValueIndex,
+        allTokens: List<DesignToken>,
+        expectedCategory: TokenCategory?,
+        expectedRole: TokenRole? = null,
+    ): List<TokenSuggestion> {
         // Prefer the CSS-property-derived category over the literal's natural
         // one when known: `padding: 6px` looks up under SPACING, `font-size:
         // 12px` under TYPOGRAPHY, etc. Falling back to the literal's category

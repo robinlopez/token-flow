@@ -6,7 +6,6 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.Task
@@ -137,13 +136,9 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
 
     /**
      * Stable identifier for the currently-selected scope choice, used to
-     * preserve the user's selection across combo rebuilds (settings change,
-     * active-editor switch). Without this, the "Active editor (xxx)" entry's
-     * label changes with each file the user opens — by the time we rebuild,
-     * label-based matching breaks and the selection drifts back to whichever
-     * scope `rebuildScopeCombo` thinks is "deepest" for the new file.
+     * preserve the user's selection across combo rebuilds (e.g. when the user
+     * edits scopes in settings).
      *  - "ALL"     → "All project"
-     *  - "ACTIVE"  → the dynamic "Active editor (…)" entry
      *  - "Scope: <name>" → a named configured scope
      */
     private var stickyScopeKey: String? = null
@@ -163,8 +158,7 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
             }
         }
         addActionListener {
-            // Capture the user's explicit pick so the next rebuild restores it
-            // instead of falling back to the active-editor heuristic.
+            // Capture the user's explicit pick so the next rebuild restores it.
             val choice = selectedItem as? ScopeChoice ?: return@addActionListener
             stickyScopeKey = scopeChoiceKey(choice)
         }
@@ -172,7 +166,6 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
 
     private fun scopeChoiceKey(choice: ScopeChoice): String = when {
         choice.label == "All project" -> "ALL"
-        choice.label.startsWith("Active editor") -> "ACTIVE"
         else -> choice.label  // scope names are stable
     }
 
@@ -248,7 +241,6 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
             add(scrollColumn, BorderLayout.CENTER)
         })
         TokenSelectorSettings.getInstance(project).addScopesChangeListener(scopesListener)
-        setupEditorTracking()
         setupFileChangeTracking()
     }
 
@@ -281,57 +273,28 @@ class AnalyzePanel(private val project: Project) : SimpleToolWindowPanel(true, t
         )
     }
     
-    private fun setupEditorTracking() {
-        project.messageBus.connect(project).subscribe(
-            com.intellij.openapi.fileEditor.FileEditorManagerListener.FILE_EDITOR_MANAGER,
-            object : com.intellij.openapi.fileEditor.FileEditorManagerListener {
-                override fun selectionChanged(event: com.intellij.openapi.fileEditor.FileEditorManagerEvent) {
-                    rebuildScopeCombo()
-                }
-            }
-        )
-    }
-
     private fun rebuildScopeCombo() {
         // Build the new list of items in the exact order configured in settings.
         // Swap the ComboBoxModel atomically so we don't race with Swing's own
         // selection/listener events between successive removeAllItems/addItem
         // calls (which used to leave the combo showing a stale order).
+        //
+        // The analyser scope is an explicit, user-driven choice — it does NOT
+        // follow the active editor (issue #21). The Library and Hardcoded
+        // panels keep their own active-editor follow-along behaviour.
         val items = mutableListOf<ScopeChoice>()
         items += ScopeChoice("All project", null)
-        val activeFile = FileEditorManager.getInstance(project).selectedEditor?.file
-        if (activeFile != null) {
-            items += ScopeChoice("Active editor (${activeFile.name})", activeFile)
-        }
         for (scope in TokenSelectorSettings.getInstance(project).scopes) {
             val rep = representativeFileFor(scope) ?: continue
             items += ScopeChoice("Scope: ${scope.name.ifBlank { "(unnamed)" }}", rep)
         }
         scopeCombo.model = javax.swing.DefaultComboBoxModel(items.toTypedArray())
 
-        // Selection priority:
-        //  1. The user's last explicit pick (stickyScopeKey) — so the combo
-        //     stays put as the user navigates between files.
-        //  2. On first build (no sticky yet) and only then, fall back to the
-        //     historical active-editor heuristic so the panel still opens on
-        //     something useful out of the box.
+        // Restore the user's last explicit pick across rebuilds; default to
+        // "All project" on first build or when the picked scope is gone.
         val sticky = stickyScopeKey
-        if (sticky != null) {
-            val matchIdx = items.indexOfFirst { scopeChoiceKey(it) == sticky }
-            scopeCombo.selectedIndex = if (matchIdx >= 0) matchIdx else 0
-            return
-        }
-        if (activeFile != null) {
-            val activeScopes = ScopeResolver.activeScopesFor(project, activeFile)
-            val deepest = activeScopes.lastOrNull { !it.isCommon }
-            if (deepest != null) {
-                val targetName = "Scope: ${deepest.name.ifBlank { "(unnamed)" }}"
-                val match = items.indexOfFirst { it.label == targetName }
-                scopeCombo.selectedIndex = if (match >= 0) match else (if (items.size > 1) 1 else 0)
-            } else {
-                scopeCombo.selectedIndex = 0
-            }
-        }
+        val matchIdx = if (sticky != null) items.indexOfFirst { scopeChoiceKey(it) == sticky } else -1
+        scopeCombo.selectedIndex = if (matchIdx >= 0) matchIdx else 0
     }
 
     private fun representativeFileFor(scope: Scope): VirtualFile? {

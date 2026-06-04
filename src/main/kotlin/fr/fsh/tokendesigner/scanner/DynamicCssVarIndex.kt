@@ -124,13 +124,13 @@ class DynamicCssVarIndex(private val project: Project) {
         /**
          * A bare `--name: value` custom-property declaration inside a CSS
          * rule body. Group 1 = name, group 2 = value (everything up to the
-         * statement terminator). The negative lookbehind on `[A-Za-z0-9_-]`
-         * rules out BEM identifiers like `.block__elem--mod:hover` — the
-         * `--mod` there is preceded by an alphanumeric character so the
-         * regex skips it.
+         * statement terminator). The negative lookbehind on `[A-Za-z0-9_&-]`
+         * rules out BEM identifiers in selectors — `.block__elem--mod:hover`
+         * (preceded by an alphanumeric) *and* SCSS parent-ref modifiers like
+         * `&--selected:not(.x)` (preceded by `&`). See issue #25.
          */
         private val CSS_DECL = Regex(
-            "(?<![A-Za-z0-9_-])--([A-Za-z_][A-Za-z0-9_-]*)\\s*:\\s*([^;\\n}]*)"
+            "(?<![A-Za-z0-9_&-])--([A-Za-z_][A-Za-z0-9_-]*)\\s*:\\s*([^;\\n}]*)"
         )
 
         fun getInstance(project: Project): DynamicCssVarIndex =

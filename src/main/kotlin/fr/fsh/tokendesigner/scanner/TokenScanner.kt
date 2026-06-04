@@ -128,7 +128,23 @@ class TokenScanner(private val project: Project) {
         sink: MutableList<RawToken>,
     ) {
         if (isScss) {
+            // Only top-level `$var:` declarations are design tokens. Variables
+            // declared inside a `{ … }` block (`@function`, `@mixin`, `@each`,
+            // a selector, …) are locally-scoped Sass helpers — e.g. `$map`,
+            // `$value` reused across a loop — and must not pollute the index
+            // (issue #24). We gate on brace depth, advancing a running counter
+            // over the gaps between successive matches (matches are ordered).
+            var pos = 0
+            var depth = 0
             for (m in SCSS_VAR_REGEX.findAll(text)) {
+                while (pos < m.range.first) {
+                    when (text[pos]) {
+                        '{' -> depth++
+                        '}' -> if (depth > 0) depth--
+                    }
+                    pos++
+                }
+                if (depth > 0) continue
                 val raw = m.groupValues[2].trim().trimEnd(';').trim()
                 val cleanedRaw = raw.replace(Regex("(?i)!(default|global|important)\\s*$"), "").trim()
                 sink += RawToken(
@@ -150,6 +166,10 @@ class TokenScanner(private val project: Project) {
             }
         }
         for (m in CSS_VAR_REGEX.findAll(text)) {
+            // A real custom-property value never contains a `{` — its presence
+            // means we captured a selector that slipped past the lookbehind
+            // (e.g. a BEM modifier spanning to the rule's opening brace). Skip.
+            if ('{' in m.groupValues[2]) continue
             val raw = m.groupValues[2].trim().trimEnd(';').trim()
             val cleanedRaw = raw.replace(Regex("(?i)!important\\s*$"), "").trim()
             sink += RawToken(
@@ -163,8 +183,14 @@ class TokenScanner(private val project: Project) {
     }
 
     private fun extractJsLike(text: CharSequence, path: String, sink: MutableList<RawToken>) {
+        val fileName = path.substringAfterLast('/')
+        // Storybook stories, test files, and config files never contain design tokens.
+        if (".stories." in fileName || ".spec." in fileName || ".test." in fileName) return
+
         val parsed = JsTokenFileParserRegistry.parseFull(text)
-        val kind = JsTokenFileParserRegistry.parserFor(parsed.mode).kind
+        if (parsed.mode == JsTokenFileParserRegistry.Mode.NONE) return
+
+        val kind = JsTokenFileParserRegistry.parserFor(parsed.mode)!!.kind
         for (leaf in parsed.leaves) {
             sink += RawToken(
                 name = leaf.path,
@@ -378,8 +404,14 @@ class TokenScanner(private val project: Project) {
         private val SCSS_VAR_REGEX = Regex(
             "(?m)^\\s*\\$([A-Za-z_][A-Za-z0-9_-]*)\\s*:\\s*([^;\\n]+)\\s*;?"
         )
+        // CSS custom-property declaration: `--name: value`. The negative
+        // lookbehind on `[A-Za-z0-9_&-]` rules out BEM modifier syntax inside
+        // selectors — both `.block__slot--closeable:hover` (preceded by an
+        // alphanumeric) and the SCSS parent-ref form `&--selected:not(.x)`
+        // (preceded by `&`) would otherwise be captured as fake CSS variables.
+        // See issue #25. The same guard protects `DynamicCssVarIndex.CSS_DECL`.
         private val CSS_VAR_REGEX = Regex(
-            "--([A-Za-z_][A-Za-z0-9_-]*)\\s*:\\s*([^;}\\n]+)\\s*;?"
+            "(?<![A-Za-z0-9_&-])--([A-Za-z_][A-Za-z0-9_-]*)\\s*:\\s*([^;}\\n]+)\\s*;?"
         )
         // SCSS map keys: `"<token-name>": <value>,` where token names are
         // lowercase-hyphenated. The trailing comma keeps the pattern specific

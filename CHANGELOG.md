@@ -2,6 +2,22 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/) — versionning [SemVer](https://semver.org/).
 
+## [0.2.2] — 2026-06-04
+
+### Fixed
+- **TS/JS indexer — value-based object & leaf filtering** : each exported object is now classified by the *shape of its leaf values*. An object is kept only when its values are recognisable style primitives (colours, dimensions, aliases, unitless numbers, style keywords). Objects holding arbitrary application strings — event-name enums (`{ CREATED: 'ENTITY_CREATED' }`), config maps, JSON-Schema bodies (`type: 'object'`, `minimum: 0`) — are dropped wholesale. Within a kept object, individual non-style leaves are also dropped: a status-config map (`{ PICKING: { label: 'En picking', variant: 'info', bg: '#e8ecf5', color: '#4563a0' } }`) now indexes only the colours, no longer the `label` / `variant` strings. Closes [#24](https://github.com/robinlopez/token-flow/issues/24).
+- **TS/JS indexer — JSON Schema files skipped** : files containing JSON Schema vocabulary keys (`$schema`, `$defs`, `$ref`) — quoted or unquoted — are classified `Mode.NONE` and bypass the parser entirely. Schema paths (`$defs.WidgetSlot.properties.flex.minimum`) and `$ref` strings (`'#/$defs/LayoutRow'`) no longer appear as pseudo-tokens.
+- **TS/JS indexer — Storybook / test files skipped** : files matching `*.stories.*`, `*.spec.*`, `*.test.*` or importing from `@storybook/*` are excluded before parsing.
+- **SCSS indexer — local variables skipped** : `$variables` declared inside any block (`@function`, `@mixin`, `@each`, selector…) are recognised as local Sass helpers and no longer indexed. Only brace-depth-0 declarations are treated as tokens.
+- **SCSS / CSS indexer — BEM modifiers no longer captured as variables** : the `--name` segment of a BEM selector was being captured by the custom-property regex, producing fake tokens (`--closeable: hover`, `--selected: not(...)`). The negative lookbehind now also excludes the SCSS parent-ref form `&--selected:not(.x)`, and a value containing `{` (a captured selector) is rejected outright. `--` is only treated as a token in a real property declaration or a `var(--…)` call. Closes [#25](https://github.com/robinlopez/token-flow/issues/25).
+- **Suggestion engine — no circular self-reference** : a token definition flagged as hardcoded no longer suggests itself as the replacement. `--color-bg-page: #e5e9eb` used to offer `var(--color-bg-page)` (which would produce `--color-bg-page: var(--color-bg-page)`); the engine now excludes the token currently being declared from its own suggestion list, across CSS (`--x`), SCSS (`$x`) and JS object-path (`colors.bg`) declarations. Closes [#23](https://github.com/robinlopez/token-flow/issues/23).
+
+### Changed
+- **Analyser — "Active editor" scope option removed** : the Scope picker in the Analyser toolbar no longer carries an *Active editor (…)* entry, and the panel no longer follows the active editor. The analysed scope is now a purely explicit, user-driven choice (*All project* by default, plus every configured scope), which keeps the report stable as you navigate between files. The Library and Hardcoded Values panels keep their active-editor follow-along behaviour unchanged. Closes [#21](https://github.com/robinlopez/token-flow/issues/21).
+
+### Internal
+- Unit-test suites : `StyleValueHeuristicsTest` and `JsParserFalsePositiveTest` cover the value classifier and the three false-positive families from [#24](https://github.com/robinlopez/token-flow/issues/24). `CssVarRegexTest` locks the BEM-safe behaviour from [#25](https://github.com/robinlopez/token-flow/issues/25). `SuggestionEngineSelfReferenceTest` locks the no-self-reference behaviour from [#23](https://github.com/robinlopez/token-flow/issues/23).
+
 ## [0.2.1] — 2026-05-29
 
 ### Added

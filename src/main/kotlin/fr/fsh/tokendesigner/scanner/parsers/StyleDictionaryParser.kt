@@ -2,6 +2,7 @@ package fr.fsh.tokendesigner.scanner.parsers
 
 import fr.fsh.tokendesigner.model.TokenKind
 import fr.fsh.tokendesigner.scanner.JsObjectTokenParser
+import fr.fsh.tokendesigner.scanner.StyleValueHeuristics
 
 /**
  * Parses TS/JS files written in the Style-Dictionary / PrimeUIX preset style:
@@ -20,5 +21,14 @@ object StyleDictionaryParser : JsTokenFileParser {
     override val kind: TokenKind = TokenKind.JS_OBJECT_PATH
 
     override fun parse(text: CharSequence): List<ParsedLeaf> =
-        JsObjectTokenParser.parse(text).map { ParsedLeaf(it.path, it.value, it.offset) }
+        // Classify each exported object independently: a file may hold a real
+        // token preset next to a JSON-Schema body or an enum map. Objects whose
+        // values aren't style primitives are dropped wholesale; within a kept
+        // object, individual non-style leaves (labels, enum strings) are also
+        // dropped so only real token values survive (see issue #24).
+        JsObjectTokenParser.parseGroups(text)
+            .filter { group -> StyleValueHeuristics.looksLikeTokenObject(group.map { it.value }) }
+            .flatten()
+            .filter { StyleValueHeuristics.isIndexableLeafValue(it.value) }
+            .map { ParsedLeaf(it.path, it.value, it.offset) }
 }

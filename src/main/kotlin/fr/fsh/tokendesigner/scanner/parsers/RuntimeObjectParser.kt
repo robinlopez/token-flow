@@ -2,6 +2,7 @@ package fr.fsh.tokendesigner.scanner.parsers
 
 import fr.fsh.tokendesigner.model.TokenKind
 import fr.fsh.tokendesigner.scanner.JsObjectTokenParser
+import fr.fsh.tokendesigner.scanner.StyleValueHeuristics
 
 /**
  * Parses TS/JS files where design tokens are exposed as a typed runtime
@@ -66,7 +67,15 @@ object RuntimeObjectParser : JsTokenFileParser {
             val initialPath = if (hasTypeAnnotation) emptyList() else listOf(name)
             // The trailing `{` is the last char of the match → its index is `match.range.last`.
             val openBrace = match.range.last
-            JsObjectTokenParser.parseAt(text, openBrace, initialPath).forEach {
+            val leaves = JsObjectTokenParser.parseAt(text, openBrace, initialPath)
+            // Skip objects that hold arbitrary application data rather than
+            // style values (event-name enums, config maps, …). See issue #24.
+            if (!StyleValueHeuristics.looksLikeTokenObject(leaves.map { it.value })) continue
+            leaves.forEach {
+                // Drop non-style leaves inside an otherwise-token object: a
+                // status-config map keyed by enum carries both colours (tokens)
+                // and labels / variant names (not tokens). See issue #24.
+                if (!StyleValueHeuristics.isIndexableLeafValue(it.value)) return@forEach
                 out += ParsedLeaf(it.path, it.value, it.offset)
             }
         }
