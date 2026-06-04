@@ -95,6 +95,29 @@ class JsParserFalsePositiveTest {
     }
 
     @Test
+    fun `status-config map keeps colours but drops labels and variant names`() {
+        // A Record keyed by enum value: each entry mixes real colours
+        // (bg / color) with non-token metadata (label / variant). Only the
+        // colours must survive. See issue #24 (follow-up).
+        val src = """
+            export const HANDLING_UNIT_STATUS_CONFIG: Record<HandlingUnitStatus, HandlingUnitStatusConfig> = {
+              IN_STOCK:  { label: 'En stock',   variant: 'success', bg: '#dcfce7', color: '#15803d' },
+              PICKING:   { label: 'En picking', variant: 'info',    bg: '#e8ecf5', color: '#4563a0' },
+              INCIDENT:  { label: 'Incident',   variant: 'danger',  bg: '#fee2e2', color: '#b91c1c' },
+            };
+        """.trimIndent()
+
+        val leaves = JsTokenFileParserRegistry.parseFull(src).leaves
+        val paths = leaves.map { it.path }
+        // The reported false positive must be gone.
+        assertTrue("PICKING.label leaked: $paths", paths.none { it.endsWith(".label") })
+        assertTrue("variant names leaked: $paths", paths.none { it.endsWith(".variant") })
+        // The real colours are still indexed (binding prefix stripped → typed aggregator).
+        assertTrue(leaves.any { it.value == "#4563a0" })
+        assertTrue(leaves.any { it.value == "#dcfce7" })
+    }
+
+    @Test
     fun `token preset next to an enum keeps only the preset`() {
         // Style-Dictionary mode (no runtime hint) → binding prefix is stripped,
         // so we assert on values rather than paths.

@@ -90,6 +90,21 @@ object StyleValueHeuristics {
     }
 
     /**
+     * Leaf-level gate applied *after* [looksLikeTokenObject] has accepted the
+     * surrounding object. A token dictionary can still hold non-style metadata
+     * next to its real values — e.g. a status-config map keyed by enum value
+     * (`{ PICKING: { label: 'En picking', color: '#4563a0' } }`) carries both
+     * a colour (a token) and a human label (not a token). We keep only the
+     * leaves whose value is itself a style primitive or a number, dropping the
+     * arbitrary-string siblings (`label`, `variant`, …). See issue #24.
+     */
+    fun isIndexableLeafValue(raw: String): Boolean =
+        when (classify(raw)) {
+            ValueClass.STYLE, ValueClass.NUMERIC -> true
+            ValueClass.NON_STYLE, ValueClass.EMPTY -> false
+        }
+
+    /**
      * Decides whether the leaf [values] of one exported object look like a
      * design-token dictionary.
      *

@@ -166,6 +166,10 @@ class TokenScanner(private val project: Project) {
             }
         }
         for (m in CSS_VAR_REGEX.findAll(text)) {
+            // A real custom-property value never contains a `{` — its presence
+            // means we captured a selector that slipped past the lookbehind
+            // (e.g. a BEM modifier spanning to the rule's opening brace). Skip.
+            if ('{' in m.groupValues[2]) continue
             val raw = m.groupValues[2].trim().trimEnd(';').trim()
             val cleanedRaw = raw.replace(Regex("(?i)!important\\s*$"), "").trim()
             sink += RawToken(
@@ -400,8 +404,14 @@ class TokenScanner(private val project: Project) {
         private val SCSS_VAR_REGEX = Regex(
             "(?m)^\\s*\\$([A-Za-z_][A-Za-z0-9_-]*)\\s*:\\s*([^;\\n]+)\\s*;?"
         )
+        // CSS custom-property declaration: `--name: value`. The negative
+        // lookbehind on `[A-Za-z0-9_&-]` rules out BEM modifier syntax inside
+        // selectors — both `.block__slot--closeable:hover` (preceded by an
+        // alphanumeric) and the SCSS parent-ref form `&--selected:not(.x)`
+        // (preceded by `&`) would otherwise be captured as fake CSS variables.
+        // See issue #25. The same guard protects `DynamicCssVarIndex.CSS_DECL`.
         private val CSS_VAR_REGEX = Regex(
-            "--([A-Za-z_][A-Za-z0-9_-]*)\\s*:\\s*([^;}\\n]+)\\s*;?"
+            "(?<![A-Za-z0-9_&-])--([A-Za-z_][A-Za-z0-9_-]*)\\s*:\\s*([^;}\\n]+)\\s*;?"
         )
         // SCSS map keys: `"<token-name>": <value>,` where token names are
         // lowercase-hyphenated. The trailing comma keeps the pattern specific

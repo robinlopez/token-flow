@@ -72,6 +72,10 @@ object RuntimeObjectParser : JsTokenFileParser {
             // style values (event-name enums, config maps, …). See issue #24.
             if (!StyleValueHeuristics.looksLikeTokenObject(leaves.map { it.value })) continue
             leaves.forEach {
+                // Drop non-style leaves inside an otherwise-token object: a
+                // status-config map keyed by enum carries both colours (tokens)
+                // and labels / variant names (not tokens). See issue #24.
+                if (!StyleValueHeuristics.isIndexableLeafValue(it.value)) return@forEach
                 out += ParsedLeaf(it.path, it.value, it.offset)
             }
         }

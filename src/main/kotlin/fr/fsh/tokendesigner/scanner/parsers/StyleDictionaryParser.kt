@@ -23,9 +23,12 @@ object StyleDictionaryParser : JsTokenFileParser {
     override fun parse(text: CharSequence): List<ParsedLeaf> =
         // Classify each exported object independently: a file may hold a real
         // token preset next to a JSON-Schema body or an enum map. Objects whose
-        // values aren't style primitives are dropped wholesale (see issue #24).
+        // values aren't style primitives are dropped wholesale; within a kept
+        // object, individual non-style leaves (labels, enum strings) are also
+        // dropped so only real token values survive (see issue #24).
         JsObjectTokenParser.parseGroups(text)
             .filter { group -> StyleValueHeuristics.looksLikeTokenObject(group.map { it.value }) }
             .flatten()
+            .filter { StyleValueHeuristics.isIndexableLeafValue(it.value) }
             .map { ParsedLeaf(it.path, it.value, it.offset) }
 }

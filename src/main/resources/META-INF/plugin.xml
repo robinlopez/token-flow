@@ -64,7 +64,8 @@ Supported formats: SCSS variables, CSS Custom Properties, SCSS Maps, TS/JS prese
 
 <h3>0.2.2 - Smarter Indexing & Fewer False Positives</h3>
 <ul>
-  <li>The TS/JS and SCSS parsers now automatically filter out non-style objects, JSON schemas, test/Storybook files, and local SCSS variables, drastically reducing noise without requiring any manual configuration.</li>
+  <li>The TS/JS and SCSS parsers now automatically filter out non-style objects, JSON schemas, test/Storybook files, and local SCSS variables, drastically reducing noise without requiring any manual configuration. Even inside a real token object, non-style entries (labels, variant names) are dropped — only actual style values are indexed.</li>
+  <li>BEM modifier syntax in selectors (e.g. <code>.card__slot--closeable:hover</code> or the SCSS parent-ref <code>&amp;--selected:not(.x)</code>) is no longer mistaken for a CSS custom-property declaration. <code>--</code> is only treated as a token when it really is one — a property declaration or a <code>var(--…)</code> call.</li>
 </ul>
 
 <h3>0.2.1 — Smarter hardcoded detection, sticky section headers</h3>

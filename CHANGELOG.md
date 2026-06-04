@@ -5,13 +5,14 @@ Format : [Keep a Changelog](https://keepachangelog.com/) — versionning [SemVer
 ## [0.2.2] — 2026-06-04
 
 ### Fixed
-- **TS/JS indexer — value-based object filtering** : each exported object is now classified by the *shape of its leaf values*. An object is kept only when its values are recognisable style primitives (colours, dimensions, aliases, unitless numbers, style keywords). Objects holding arbitrary application strings — event-name enums (`{ CREATED: 'ENTITY_CREATED' }`), config maps, JSON-Schema bodies (`type: 'object'`, `minimum: 0`) — are dropped wholesale instead of surfacing as pseudo-tokens. Closes [#24](https://github.com/robinlopez/token-flow/issues/24).
+- **TS/JS indexer — value-based object & leaf filtering** : each exported object is now classified by the *shape of its leaf values*. An object is kept only when its values are recognisable style primitives (colours, dimensions, aliases, unitless numbers, style keywords). Objects holding arbitrary application strings — event-name enums (`{ CREATED: 'ENTITY_CREATED' }`), config maps, JSON-Schema bodies (`type: 'object'`, `minimum: 0`) — are dropped wholesale. Within a kept object, individual non-style leaves are also dropped: a status-config map (`{ PICKING: { label: 'En picking', variant: 'info', bg: '#e8ecf5', color: '#4563a0' } }`) now indexes only the colours, no longer the `label` / `variant` strings. Closes [#24](https://github.com/robinlopez/token-flow/issues/24).
 - **TS/JS indexer — JSON Schema files skipped** : files containing JSON Schema vocabulary keys (`$schema`, `$defs`, `$ref`) — quoted or unquoted — are classified `Mode.NONE` and bypass the parser entirely. Schema paths (`$defs.WidgetSlot.properties.flex.minimum`) and `$ref` strings (`'#/$defs/LayoutRow'`) no longer appear as pseudo-tokens.
 - **TS/JS indexer — Storybook / test files skipped** : files matching `*.stories.*`, `*.spec.*`, `*.test.*` or importing from `@storybook/*` are excluded before parsing.
 - **SCSS indexer — local variables skipped** : `$variables` declared inside any block (`@function`, `@mixin`, `@each`, selector…) are recognised as local Sass helpers and no longer indexed. Only brace-depth-0 declarations are treated as tokens.
+- **SCSS / CSS indexer — BEM modifiers no longer captured as variables** : the `--name` segment of a BEM selector was being captured by the custom-property regex, producing fake tokens (`--closeable: hover`, `--selected: not(...)`). The negative lookbehind now also excludes the SCSS parent-ref form `&--selected:not(.x)`, and a value containing `{` (a captured selector) is rejected outright. `--` is only treated as a token in a real property declaration or a `var(--…)` call. Closes [#25](https://github.com/robinlopez/token-flow/issues/25).
 
 ### Internal
-- First unit-test suite : `StyleValueHeuristicsTest` and `JsParserFalsePositiveTest` cover the value classifier and all three false-positive families from [#24](https://github.com/robinlopez/token-flow/issues/24).
+- Unit-test suites : `StyleValueHeuristicsTest` and `JsParserFalsePositiveTest` cover the value classifier and the three false-positive families from [#24](https://github.com/robinlopez/token-flow/issues/24). `CssVarRegexTest` locks the BEM-safe behaviour from [#25](https://github.com/robinlopez/token-flow/issues/25).
 
 ## [0.2.1] — 2026-05-29
 
