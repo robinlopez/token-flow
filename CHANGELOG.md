@@ -10,9 +10,10 @@ Format : [Keep a Changelog](https://keepachangelog.com/) — versionning [SemVer
 - **TS/JS indexer — Storybook / test files skipped** : files matching `*.stories.*`, `*.spec.*`, `*.test.*` or importing from `@storybook/*` are excluded before parsing.
 - **SCSS indexer — local variables skipped** : `$variables` declared inside any block (`@function`, `@mixin`, `@each`, selector…) are recognised as local Sass helpers and no longer indexed. Only brace-depth-0 declarations are treated as tokens.
 - **SCSS / CSS indexer — BEM modifiers no longer captured as variables** : the `--name` segment of a BEM selector was being captured by the custom-property regex, producing fake tokens (`--closeable: hover`, `--selected: not(...)`). The negative lookbehind now also excludes the SCSS parent-ref form `&--selected:not(.x)`, and a value containing `{` (a captured selector) is rejected outright. `--` is only treated as a token in a real property declaration or a `var(--…)` call. Closes [#25](https://github.com/robinlopez/token-flow/issues/25).
+- **Suggestion engine — no circular self-reference** : a token definition flagged as hardcoded no longer suggests itself as the replacement. `--color-bg-page: #e5e9eb` used to offer `var(--color-bg-page)` (which would produce `--color-bg-page: var(--color-bg-page)`); the engine now excludes the token currently being declared from its own suggestion list, across CSS (`--x`), SCSS (`$x`) and JS object-path (`colors.bg`) declarations. Closes [#23](https://github.com/robinlopez/token-flow/issues/23).
 
 ### Internal
-- Unit-test suites : `StyleValueHeuristicsTest` and `JsParserFalsePositiveTest` cover the value classifier and the three false-positive families from [#24](https://github.com/robinlopez/token-flow/issues/24). `CssVarRegexTest` locks the BEM-safe behaviour from [#25](https://github.com/robinlopez/token-flow/issues/25).
+- Unit-test suites : `StyleValueHeuristicsTest` and `JsParserFalsePositiveTest` cover the value classifier and the three false-positive families from [#24](https://github.com/robinlopez/token-flow/issues/24). `CssVarRegexTest` locks the BEM-safe behaviour from [#25](https://github.com/robinlopez/token-flow/issues/25). `SuggestionEngineSelfReferenceTest` locks the no-self-reference behaviour from [#23](https://github.com/robinlopez/token-flow/issues/23).
 
 ## [0.2.1] — 2026-05-29
 
