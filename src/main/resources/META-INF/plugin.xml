@@ -27,6 +27,10 @@ Supported formats: SCSS variables, CSS Custom Properties, SCSS Maps, TS/JS prese
   <li><b>Deep Context</b><br/>
       Hover any token to see its resolved value, aliases and per-mode variants
       (Dark / Light / breakpoints).</li>
+  <li><b>One-click Copy <code>(⌘/Ctrl+Shift+Click)</code></b><br/>
+      Hold the modifier and click any token reference to instantly copy its
+      resolved value. For colours, also pick HEX, RGB, HSL or OKLCH from a
+      tiny dropdown — no hover, no panel, no detour.</li>
   <li><b>Full-scale Audit</b><br/>
       An "Analyse" tab grades your project health.<br/>
       Identify tech debt, unused tokens and hardcoded clusters in seconds.</li>
