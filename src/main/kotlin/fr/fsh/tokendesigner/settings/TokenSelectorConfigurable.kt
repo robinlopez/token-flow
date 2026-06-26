@@ -91,6 +91,8 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
     private val valueCompletionTriggerCombo = javax.swing.JComboBox(ValueCompletionTrigger.entries.toTypedArray())
     private val inspectVariableDeclarationsCheckBox = JBCheckBox("Detect hardcoded values in variable declarations (e.g. \$color: #fff)")
     private val detectRuntimeInjectedCssVarsCheckBox = JBCheckBox("Recognise CSS variables declared outside token sources (runtime injection + contextual CSS rules)")
+    private val copyClickCheckBox = JBCheckBox("Copy a token's value with a modifier + click in the editor")
+    private val copyClickCombo = javax.swing.JComboBox(CopyClickShortcut.entries.toTypedArray())
     private val iconVariantCombo = javax.swing.JComboBox(IconVariant.entries.toTypedArray()).apply {
         // List rows show a 48px preview; the closed combo (index == -1) keeps a
         // compact 16px size so it doesn't blow up the form layout.
@@ -217,7 +219,9 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
         if (saved.iconVariantName != (iconVariantCombo.selectedItem as IconVariant).name) return true
         if (saved.inspectVariableDeclarations != inspectVariableDeclarationsCheckBox.isSelected) return true
         if (saved.detectRuntimeInjectedCssVars != detectRuntimeInjectedCssVarsCheckBox.isSelected) return true
-        
+        if (saved.copyClickEnabled != copyClickCheckBox.isSelected) return true
+        if (saved.copyClickShortcut != copyClickCombo.selectedItem as CopyClickShortcut) return true
+
         val current = currentScopes()
         if (saved.scopes.size != current.size) return true
         return !saved.scopes.zip(current).all { (s1, s2) ->
@@ -245,6 +249,8 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
         s.iconVariantName = newIcon
         s.inspectVariableDeclarations = inspectVariableDeclarationsCheckBox.isSelected
         s.detectRuntimeInjectedCssVars = detectRuntimeInjectedCssVarsCheckBox.isSelected
+        s.copyClickEnabled = copyClickCheckBox.isSelected
+        s.copyClickShortcut = copyClickCombo.selectedItem as CopyClickShortcut
         if (iconChanged) s.fireIconChanged()
         TokenIndex.getInstance(project).invalidate()
         // Fire AFTER the index has been invalidated so listeners that re-fetch
@@ -270,6 +276,9 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
         iconVariantCombo.selectedItem = IconVariant.fromName(s.iconVariantName)
         inspectVariableDeclarationsCheckBox.isSelected = s.inspectVariableDeclarations
         detectRuntimeInjectedCssVarsCheckBox.isSelected = s.detectRuntimeInjectedCssVars
+        copyClickCheckBox.isSelected = s.copyClickEnabled
+        copyClickCombo.selectedItem = s.copyClickShortcut
+        copyClickCombo.isEnabled = s.copyClickEnabled
     }
 
     override fun disposeUIResources() {
@@ -765,7 +774,16 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
             addHyperlinkListener { openKeymapFor("DesignTokenSelector.GoToDeclaration") }
         }
 
+        copyClickCheckBox.addActionListener { copyClickCombo.isEnabled = copyClickCheckBox.isSelected }
+        val copyClickRow = JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(6), 0)).apply {
+            alignmentX = java.awt.Component.LEFT_ALIGNMENT
+            border = JBEmptyBorder(0, JBUI.scale(20), 0, 0)
+            add(JBLabel("Shortcut:"))
+            add(copyClickCombo)
+        }
+
         val sectionAlternatives = sectionLabel("Hover info popup")
+        val sectionCopyClick = sectionLabel("Copy value (modifier + click)")
         val sectionCompletion = sectionLabel("Code completion")
         val sectionShortcut = sectionLabel("Keyboard")
         val sectionAppearance = sectionLabel("Appearance")
@@ -781,6 +799,13 @@ class TokenSelectorConfigurable(private val project: Project) : Configurable {
             add(sectionAlternatives)
             add(hoverCheckBox.apply { alignmentX = java.awt.Component.LEFT_ALIGNMENT })
             add(hoverDelayRow)
+            add(verticalSpacer())
+            add(sectionCopyClick)
+            add(copyClickCheckBox.apply { alignmentX = java.awt.Component.LEFT_ALIGNMENT })
+            add(copyClickRow)
+            add(htmlMultiLine("<span style='color:gray'>Click a token reference (<code>var(--…)</code>, <code>\$spacing-xl</code>, <code>'{…}'</code>) while holding the shortcut to copy its resolved value, name or — for colours — HEX/RGB/HSL/OKLCH.</span>").apply {
+                border = JBUI.Borders.emptyLeft(20)
+            })
             add(verticalSpacer())
             add(sectionCompletion)
             add(autocompleteCheckBox.apply { alignmentX = java.awt.Component.LEFT_ALIGNMENT })

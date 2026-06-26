@@ -80,6 +80,14 @@ class TokenSelectorSettings : PersistentStateComponent<TokenSelectorSettings.Sta
         @JvmField var scopes: MutableList<Scope> = mutableListOf()
         @JvmField var openOnHover: Boolean = false
         @JvmField var hoverDelayMs: Int = 700
+        /**
+         * When true (default), holding [copyClickShortcut] and clicking a token
+         * reference in the editor opens a dropdown to copy its resolved value,
+         * name or — for colours — alternate notations (issue #27).
+         */
+        @JvmField var copyClickEnabled: Boolean = true
+        /** [CopyClickShortcut] enum name driving the modifier+click gesture above. */
+        @JvmField var copyClickShortcut: String = "CMD_SHIFT"
         @JvmField var autocompleteEnabled: Boolean = true
         /**
          * When true, the completion contributor also triggers on typed values
@@ -178,6 +186,14 @@ class TokenSelectorSettings : PersistentStateComponent<TokenSelectorSettings.Sta
     var hoverDelayMs: Int
         get() = state.hoverDelayMs.coerceIn(100, 5000)
         set(value) { state.hoverDelayMs = value.coerceIn(100, 5000) }
+
+    var copyClickEnabled: Boolean
+        get() = state.copyClickEnabled
+        set(value) { state.copyClickEnabled = value }
+
+    var copyClickShortcut: CopyClickShortcut
+        get() = CopyClickShortcut.fromName(state.copyClickShortcut)
+        set(value) { state.copyClickShortcut = value.name }
 
     var autocompleteEnabled: Boolean
         get() = state.autocompleteEnabled

@@ -2,6 +2,16 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/) — versionning [SemVer](https://semver.org/).
 
+## [0.2.3] — 2026-06-26
+
+### Added
+- **Copy a token's resolved value with modifier + click** : holding `⌘/Ctrl + Shift` and clicking a token reference in the editor (`var(--…)`, `$var`, `'{a.b}'`, `dt('a.b')`, runtime property access) opens a dropdown to copy its value. Resolution follows the full alias chain to the primitive, so a semantic alias copies the real value (`#e5e9eb`), not the intermediate token. The dropdown preselects the resolved value (Enter to copy), and also offers the token reference as written in code. A transient `📋 Copied "…"` balloon confirms the copy. Implemented as a programmatic `EditorMouseListener` (`CopyValueClickStartup`) that consumes the click so the IDE doesn't reposition the caret or start a multi-caret selection. Closes [#27](https://github.com/robinlopez/token-flow/issues/27).
+- **Colour notation conversions in the copy dropdown** : for `COLOR` tokens the dropdown surfaces the resolved colour in `HEX`, `RGB`, `HSL` and `OKLCH`, skipping whichever notation the resolved value already uses. OKLCH is computed via Björn Ottosson's sRGB → OKLab transform (`ColorConversions`), and all numeric output is formatted with `Locale.ROOT` so the decimal separator is always `.` regardless of the IDE locale.
+- **Configurable copy shortcut** : a new *Copy value (modifier + click)* section under *Settings → Tools → Token Flow → Triggers* lets the user pick the modifier combo (`⌘/Ctrl + Shift`, `Ctrl + Shift`, `Ctrl + Alt`, `Alt + Shift`, `Alt`) or disable the gesture. The `⌘/Ctrl + Shift` default maps to the platform's primary modifier (⌘ on macOS, Ctrl elsewhere).
+
+### Internal
+- `ColorConversionsTest` locks the HEX/RGB/HSL/OKLCH conversions, the source-format detection, and the locale-safe decimal separator.
+
 ## [0.2.2] — 2026-06-04
 
 ### Fixed

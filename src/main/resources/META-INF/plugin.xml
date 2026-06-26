@@ -27,6 +27,10 @@ Supported formats: SCSS variables, CSS Custom Properties, SCSS Maps, TS/JS prese
   <li><b>Deep Context</b><br/>
       Hover any token to see its resolved value, aliases and per-mode variants
       (Dark / Light / breakpoints).</li>
+  <li><b>One-click Copy <code>(⌘/Ctrl+Shift+Click)</code></b><br/>
+      Hold the modifier and click any token reference to instantly copy its
+      resolved value. For colours, also pick HEX, RGB, HSL or OKLCH from a
+      tiny dropdown — no hover, no panel, no detour.</li>
   <li><b>Full-scale Audit</b><br/>
       An "Analyse" tab grades your project health.<br/>
       Identify tech debt, unused tokens and hardcoded clusters in seconds.</li>
@@ -61,6 +65,13 @@ Supported formats: SCSS variables, CSS Custom Properties, SCSS Maps, TS/JS prese
     ]]></description>
 
     <change-notes><![CDATA[
+
+<h3>0.2.3 — Copy token values straight from the editor</h3>
+<ul>
+  <li><b>Modifier+click to copy</b>: hold <code>⌘/Ctrl + Shift</code> and click a token reference (<code>var(--…)</code>, <code>$spacing-xl</code>, <code>'{…}'</code>) to open a dropdown and copy its <b>resolved value</b> in one click — alias chains are followed to the primitive.</li>
+  <li><b>Colour notations on demand</b>: for colour tokens the dropdown also offers the resolved colour as <b>HEX, RGB, HSL and OKLCH</b>, plus the token reference itself.</li>
+  <li><b>Configurable shortcut</b>: change the modifier combo (or turn the feature off) under <i>Settings → Tools → Token Flow</i>.</li>
+</ul>
 
 <h3>0.2.2 - Smarter Indexing & Fewer False Positives</h3>
 <ul>
@@ -240,6 +251,8 @@ Supported formats: SCSS variables, CSS Custom Properties, SCSS Maps, TS/JS prese
                     factoryClass="fr.fsh.tokendesigner.ui.DesignTokenToolWindowFactory"/>
 
         <postStartupActivity implementation="fr.fsh.tokendesigner.hover.HoverPopupStartup"/>
+
+        <postStartupActivity implementation="fr.fsh.tokendesigner.hover.CopyValueClickStartup"/>
 
         <completion.contributor language="any"
                                 implementationClass="fr.fsh.tokendesigner.completion.TokenCompletionContributor"/>
