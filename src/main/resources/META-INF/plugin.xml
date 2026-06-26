@@ -62,6 +62,13 @@ Supported formats: SCSS variables, CSS Custom Properties, SCSS Maps, TS/JS prese
 
     <change-notes><![CDATA[
 
+<h3>0.2.3 — Copy token values straight from the editor</h3>
+<ul>
+  <li><b>Modifier+click to copy</b>: hold <code>⌘/Ctrl + Shift</code> and click a token reference (<code>var(--…)</code>, <code>$spacing-xl</code>, <code>'{…}'</code>) to open a dropdown and copy its <b>resolved value</b> in one click — alias chains are followed to the primitive.</li>
+  <li><b>Colour notations on demand</b>: for colour tokens the dropdown also offers the resolved colour as <b>HEX, RGB, HSL and OKLCH</b>, plus the token reference itself.</li>
+  <li><b>Configurable shortcut</b>: change the modifier combo (or turn the feature off) under <i>Settings → Tools → Token Flow</i>.</li>
+</ul>
+
 <h3>0.2.2 - Smarter Indexing & Fewer False Positives</h3>
 <ul>
   <li>The TS/JS and SCSS parsers now automatically filter out non-style objects, JSON schemas, test/Storybook files, and local SCSS variables, drastically reducing noise without requiring any manual configuration. Even inside a real token object, non-style entries (labels, variant names) are dropped — only actual style values are indexed.</li>
@@ -240,6 +247,8 @@ Supported formats: SCSS variables, CSS Custom Properties, SCSS Maps, TS/JS prese
                     factoryClass="fr.fsh.tokendesigner.ui.DesignTokenToolWindowFactory"/>
 
         <postStartupActivity implementation="fr.fsh.tokendesigner.hover.HoverPopupStartup"/>
+
+        <postStartupActivity implementation="fr.fsh.tokendesigner.hover.CopyValueClickStartup"/>
 
         <completion.contributor language="any"
                                 implementationClass="fr.fsh.tokendesigner.completion.TokenCompletionContributor"/>

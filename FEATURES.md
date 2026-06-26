@@ -42,7 +42,19 @@ Catégorisation automatique : `COLOR`, `SPACING`, `TYPOGRAPHY`, `RADIUS`, `SHADO
 - Délai configurable (100–5000 ms).
 - N'ouvre **pas** la liste d'alternatives — celle-ci reste accessible via `Alt+T`.
 
-## 4. Alternatives popup (`Alt+T`)
+## 4. Copier la valeur d'un token (modifier + clic)
+
+- `⌘/Ctrl + Shift + Clic` sur une référence token (`var(--…)`, `$name`, `'{a.b}'`, `dt('a.b')`, property-access runtime) → **dropdown de copie**.
+- Résolution jusqu'à la **primitive** : un alias sémantique copie la vraie valeur (`#e5e9eb`), pas l'alias intermédiaire (chaîne suivie, garde anti-cycle, même pipeline que le hover).
+- Lignes proposées :
+  - **Valeur résolue** (présélectionnée, swatch couleur, `Entrée` pour copier).
+  - **HEX / RGB / HSL / OKLCH** pour les tokens COLOR — le format déjà utilisé par la valeur résolue est omis. OKLCH calculé via la transform sRGB → OKLab (Ottosson). Sortie en `Locale.ROOT` (séparateur décimal toujours `.`).
+  - **Nom / référence** tel qu'écrit dans le code.
+- Feedback : balloon transitoire `📋 Copied "…"`.
+- Implémenté en `EditorMouseListener` programmatique (`CopyValueClickStartup`) qui *consomme* le clic → pas de déplacement de caret ni de multi-curseur parasite.
+- Combo configurable (`⌘/Ctrl + Shift`, `Ctrl + Shift`, `Ctrl + Alt`, `Alt + Shift`, `Alt`) ou désactivable dans les Settings. Le défaut `⌘/Ctrl + Shift` mappe le modificateur primaire de la plateforme (⌘ macOS, Ctrl ailleurs).
+
+## 5. Alternatives popup (`Alt+T`)
 
 - Curseur sur un token CSS/SCSS (`$name`, `var(--name)`) → liste des tokens de la même catégorie, triés par proximité (HSL pour COLOR, valeur croissante pour LENGTH).
 - Curseur sur un path Style-Dictionary (`'{a.b.c}'`, `dt('a.b')`) ou une property-access runtime (`colors.PRIMARY_500`, `theme.radius.sm`) → mêmes alternatives.
@@ -51,7 +63,7 @@ Catégorisation automatique : `COLOR`, `SPACING`, `TYPOGRAPHY`, `RADIUS`, `SHADO
 - Curseur sur une **CSS variable contextuelle** (déclarée hors des token sources : override de consumer, host binding Angular, inline style React/Vue, `setProperty`) → liste **navigable des sites de déclaration**. Chaque ligne montre le sélecteur CSS interne (ou `[runtime]`), la valeur brute, le chemin `relative/path.scss:42`, et un swatch couleur quand la valeur parse. Clic → ouvre le fichier à l'offset exact. Tri : déclarations statiques d'abord, puis runtime. Type-to-filter sur selector / value / path.
 - Sélection → remplace dans le code (write action).
 
-## 5. Inspection « Hardcoded value matches a design token »
+## 6. Inspection « Hardcoded value matches a design token »
 
 - Détecte hex / `rgb()` / `hsl()` / lengths / durations qui matchent un token existant.
 - **Numériques sans unité** (`fontSize: 34`, `lineHeight: 24`, `opacity: 0.5`) détectés en position propriété-valeur — limité aux fichiers JS/TS pour éviter le bruit en CSS shorthand. Les numéros à l'intérieur d'un `(…)` (arguments de helper) sont ignorés.
@@ -64,7 +76,7 @@ Catégorisation automatique : `COLOR`, `SPACING`, `TYPOGRAPHY`, `RADIUS`, `SHADO
 - Whitelist : `0`, `0px`, `0%`, `100%`, etc.
 - Fallbacks `var(--name, fallback)` ignorés.
 
-## 6. Autocomplétion + Alt+T en TS/JS
+## 7. Autocomplétion + Alt+T en TS/JS
 
 - `var(--…` → suggère les CSS custom properties indexées.
 - `$…` (SCSS/Sass) → suggère les variables Sass.
@@ -77,7 +89,7 @@ Catégorisation automatique : `COLOR`, `SPACING`, `TYPOGRAPHY`, `RADIUS`, `SHADO
 - Boost contextuel : la catégorie correspondant à la propriété CSS/JS courante remonte ; les familles déjà utilisées dans le même bloc `{}` remontent aussi.
 - Swatch couleur affiché pour les tokens COLOR ; badge **ƒ** pour les helpers callables.
 
-## 7. Scopes (multi-UIs dans un même projet)
+## 8. Scopes (multi-UIs dans un même projet)
 
 - Un *scope* = `name` + `rootPath` (relatif au projet) + `sourcePaths` (fichiers/dossiers).
 - Quand on édite un fichier dans `rootPath`, seuls ce scope + scopes communs (rootPath vide) sont actifs.
@@ -86,7 +98,7 @@ Catégorisation automatique : `COLOR`, `SPACING`, `TYPOGRAPHY`, `RADIUS`, `SHADO
 - **Live sync** : ajouter / supprimer / renommer un scope dans les Settings rafraîchit immédiatement le combo de l'Analyser (listener `fireScopesChanged`). Bouton **Re-sync** explicite dans la toolbar Analyser pour un drop forcé du cache.
 - **Analyser scope-aware** : sélectionner un scope dans l'onglet Analyser restreint le file walk aux `rootPath` actifs et n'exclut que les catalogues du scope choisi (réparé en 0.1.2 — auparavant l'analyse scannait tout le projet).
 
-## 8. Settings (Preferences → Tools → Token Flow)
+## 9. Settings (Preferences → Tools → Token Flow)
 
 | Onglet | Option | Description |
 |---|---|---|
@@ -95,17 +107,19 @@ Catégorisation automatique : `COLOR`, `SPACING`, `TYPOGRAPHY`, `RADIUS`, `SHADO
 | Triggers | *Hover delay* | 100–5000 ms |
 | Triggers | *Suggest design tokens in completion* | Toggle de l'autocomplétion |
 | Triggers | *Customize keyboard shortcut* | Lien vers le Keymap (Alt+T par défaut) |
+| Triggers | *Copy value (modifier + click)* | Active le geste de copie + combo modificateur (`⌘/Ctrl + Shift` par défaut, ou `Ctrl + Shift` / `Ctrl + Alt` / `Alt + Shift` / `Alt`) |
 | Triggers | *Tool window icon* | Choix entre 4 variantes (white, black, orange, arc) |
 
-## 9. Actions
+## 10. Actions
 
 | Action | Raccourci | Endroit |
 |---|---|---|
 | Show All Design Tokens | — | `Tools` menu (debug) |
 | Show Token Alternatives | `Alt+T` | Editor popup menu |
 | Go to Token Declaration | `Alt+Shift+T` | Editor popup menu (configurable via Keymap) |
+| Copy Token Value | `⌘/Ctrl+Shift+Clic` | Geste éditeur (combo configurable dans les Settings) |
 
-## 10. Compatibilité
+## 11. Compatibilité
 
 - IntelliJ Platform 2024.2+ (Community OK : pas de dépendance au plugin CSS).
 - Kotlin + IntelliJ Platform Gradle Plugin 2.x.
